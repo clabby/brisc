@@ -1,0 +1,24 @@
+# ref: https://docs.codecov.com/docs/codecovyml-reference
+coverage:
+  range: 90..100
+  round: down
+  precision: 1
+  status:
+    # ref: https://docs.codecov.com/docs/commit-status
+    project:
+      default:
+        # Avoid false negatives
+        threshold: 1%
+    patch:
+      default:
+        target: auto
+        # Avoid false negatives
+        threshold: 1%
+        base: auto
+        only_pulls: true
+
+# Make comments less noisy
+comment:
+  layout: "condensed_header, condensed_files, condensed_footer"
+  require_changes: true
+  hide_project_coverage: false

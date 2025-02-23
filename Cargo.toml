@@ -1,0 +1,61 @@
+[workspace]
+members = ["crates/*"]
+exclude = ["rv-tests"]
+resolver = "2"
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+license = "MIT"
+rust-version = "1.81"
+authors = ["clabby"]
+repository = "https://github.com/clabby/brisc"
+homepage = "https://github.com/clabby/brisc"
+keywords = ["risc-v", "emulator", "pipeline", "hardware", "isa"]
+categories = ["emulators", "risc-v"]
+
+[workspace.lints.rust]
+missing-debug-implementations = "warn"
+missing-docs = "warn"
+unreachable-pub = "warn"
+unused-must-use = "deny"
+rust-2018-idioms = "deny"
+unnameable-types = "warn"
+
+[workspace.lints.rustdoc]
+all = "warn"
+
+[workspace.lints.clippy]
+needless-return = "allow" # Temporary fix since this is breaking in nightly clippy
+all = { level = "warn", priority = -1 }
+missing-const-for-fn = "warn"
+use-self = "warn"
+option-if-let-else = "warn"
+redundant-clone = "warn"
+unusual-byte-groupings = "allow"
+
+[workspace.dependencies]
+# Local
+brisc-isa = { path = "crates/isa", default-features = false }
+brisc-hw = { path = "crates/hw", default-features = false }
+
+# External
+cfg-if = "1.0.0"
+bitflags = { version = "2.6.0", default-features = false }
+thiserror = { version = "2.0.1", default-features = false }
+hashbrown = "0.15"
+num-traits = { version = "0.2", default-features = false }
+
+# Testing + Benchmarking
+rstest = "0.24.0"
+
+[profile.dev]
+opt-level = 1
+overflow-checks = false
+
+[profile.bench]
+debug = true
+
+[profile.release]
+codegen-units = 1
+lto = "fat"

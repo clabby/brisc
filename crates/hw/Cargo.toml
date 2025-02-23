@@ -1,0 +1,34 @@
+[package]
+name = "brisc-hw"
+description = "Implementation of the hardware components of a 5-stage RISC-V i{mc} processor."
+version = "0.0.1"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# Local
+brisc-isa.workspace = true
+
+# External
+bitflags.workspace = true
+thiserror.workspace = true
+hashbrown.workspace = true
+cfg-if.workspace = true
+
+[dev-dependencies]
+rstest.workspace = true
+
+[features]
+default = ["64-bit", "m", "c"]
+
+# Architecture features
+64-bit = ["brisc-isa/64-bit"]
+m = ["brisc-isa/m"]
+c = ["brisc-isa/c"]

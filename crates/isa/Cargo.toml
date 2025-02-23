@@ -1,0 +1,27 @@
+[package]
+name = "brisc-isa"
+description = "Types and decoding utilities for the RISC-V {32/64} i{mc} ISA"
+version = "0.0.1"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+cfg-if.workspace = true
+thiserror.workspace = true
+num-traits.workspace = true
+
+[dev-dependencies]
+rstest.workspace = true
+
+[features]
+default = ["64-bit", "m", "c"]
+64-bit = []
+m = []
+c = []

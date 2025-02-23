@@ -1,0 +1,8 @@
+# Mac artifacts
+.DS_Store
+
+# Rust target dir
+target/
+
+# Temp - backup
+bu/
