@@ -50,13 +50,14 @@ where
         match cycle_res {
             Err(PipelineError::SyscallException(syscall_no)) => {
                 self.syscall_interface.syscall(syscall_no, &mut self.memory, r)?;
+
+                // Exit emulation if the syscall terminated the program.
+                if r.exit {
+                    return Ok(());
+                }
             }
             Err(e) => return Err(e),
             _ => {}
-        }
-
-        if r.exit {
-            return Ok(());
         }
 
         r.advance();
