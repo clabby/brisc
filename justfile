@@ -33,5 +33,5 @@ test *args='':
   cargo nextest run --workspace --all $@
 
 # Runs `cargo hack check` against the workspace
-hack:
-  cargo hack check --feature-powerset --no-dev-deps
+hack *args='':
+  cargo hack --feature-powerset --no-dev-deps $@
