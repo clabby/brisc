@@ -29,9 +29,57 @@ target "riscv-unknown-elf-toolchain" {
   platforms = split(",", PLATFORMS)
 }
 
-target "rust-riscv-cross" {
+target "rust-riscv32im-cross" {
   inherits = ["docker-metadata-action"]
   context = "."
   dockerfile = "docker/rust-riscv-cross.dockerfile"
+  args = {
+    ARCH = "riscv32im",
+    TARGET_FEATURES = ""
+  }
+  platforms = split(",", PLATFORMS)
+}
+
+target "rust-riscv32imc-cross" {
+  inherits = ["docker-metadata-action"]
+  context = "."
+  dockerfile = "docker/rust-riscv-cross.dockerfile"
+  args = {
+    ARCH = "riscv32imc",
+    TARGET_FEATURES = ""
+  }
+  platforms = split(",", PLATFORMS)
+}
+
+target "rust-riscv64imc-cross" {
+  inherits = ["docker-metadata-action"]
+  context = "."
+  dockerfile = "docker/rust-riscv-cross.dockerfile"
+  args = {
+    ARCH = "riscv64imac",
+    TARGET_FEATURES = "-a"
+  }
+  platforms = split(",", PLATFORMS)
+}
+
+target "rust-riscv64im-cross" {
+  inherits = ["docker-metadata-action"]
+  context = "."
+  dockerfile = "docker/rust-riscv-cross.dockerfile"
+  args = {
+    ARCH = "riscv64imac",
+    TARGET_FEATURES = "-a,-c"
+  }
+  platforms = split(",", PLATFORMS)
+}
+
+target "rust-riscv64imc-cross" {
+  inherits = ["docker-metadata-action"]
+  context = "."
+  dockerfile = "docker/rust-riscv-cross.dockerfile"
+  args = {
+    ARCH = "riscv64imac",
+    TARGET_FEATURES = "-a"
+  }
   platforms = split(",", PLATFORMS)
 }

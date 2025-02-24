@@ -1,17 +1,4 @@
 //! Compressed instructions, from the RISC-V `c` extension.
-//!
-//! WIP notes:
-//! - [x] Define [CompressedInstruction] enum with variants for each compressed opcode.
-//!   - [x] Decode + expand
-//! - [x] Define [C0] enum with variants for each C0 quadrant instruction.
-//!   - [x] Decode
-//!   - [ ] Expand (need immediate jumbling!)
-//! - [x] Define [C1] enum with variants for each C1 quadrant instruction.
-//!   - [x] Decode
-//!   - [ ] Expand (need immediate jumbling!)
-//! - [x] Define [C2] enum with variants for each C2 quadrant instruction.
-//!   - [x] Decode
-//!   - [x] Expand
 
 use super::{BType, JType, UType};
 use crate::{

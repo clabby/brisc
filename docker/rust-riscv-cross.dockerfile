@@ -1,5 +1,4 @@
-FROM runtimeverificationinc/riscv-gnu-toolchain:ubuntu-jammy-2024.04.12 AS rv-bare
-
+FROM ghcr.io/clabby/brisc/riscv-unknown-elf-toolchain:main AS rv-bare
 FROM ubuntu:22.04
 
 ARG ARCH
@@ -26,9 +25,6 @@ RUN apt-get update && apt-get install --assume-yes --no-install-recommends \
   binutils-riscv64-linux-gnu \
   llvm \
   clang
-
-# Install multilib support for the RISC-V GNU toolchain
-RUN apt-get install gcc-multilib --assume-yes --no-install-recommends
 
 # Copy the RISC-V GNU toolchain from the previous stage
 COPY --from=rv-bare /opt/riscv /opt/riscv

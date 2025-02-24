@@ -9,7 +9,10 @@ on:
         required: true
         options:
           - riscv-unknown-elf-toolchain
-          - rust-riscv-cross
+          - rust-riscv32im-cross
+          - rust-riscv32imc-cross
+          - rust-riscv64im-cross
+          - rust-riscv64imc-cross
   push:
     tags:
       # matches tags like `service/v1.0.0`
