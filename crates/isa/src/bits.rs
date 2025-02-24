@@ -45,7 +45,7 @@ where
     let index = index.to_usize().expect("index is too large for usize");
     let field_size = T::zero().count_zeros() as usize;
 
-    debug_assert!(index < field_size, "index is too large for sign-extension over the field size");
+    assert!(index < field_size, "index is too large for sign-extension over the field size");
 
     let is_signed = data & (T::one() << index);
     if is_signed == T::zero() {

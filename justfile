@@ -34,4 +34,4 @@ test *args='':
 
 # Runs `cargo hack check` against the workspace
 hack *args='':
-  cargo hack --feature-powerset --no-dev-deps $@
+  cargo hack --feature-powerset $@

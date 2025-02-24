@@ -98,7 +98,7 @@ mod test {
     }
 
     test_suites!(
-        base_dir = "../../rv-tests/riscv-tests/isa",
+        base_dir = "../../rv-tests/bin",
         rv32ui ~ glob = "rv32ui-p-*",
         rv32um ~ glob = "rv32um-p-*" ~ must_have = ["m"],
         rv32uc ~ glob = "rv32uc-p-*" ~ must_have = ["c"],

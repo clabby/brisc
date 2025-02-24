@@ -9,7 +9,7 @@ build-standard-tests:
     --rm \
     -v `pwd`/:/workdir \
     -w="/workdir" \
-    rvgnu:local bash build_std_tests.sh
+    ghcr.io/clabby/brisc/riscv-unknown-elf-toolchain:main bash build_std_tests.sh
 
     echo "
     ⠄⢀⠀⠀⡐⠠⠀⢂⣠⡤⣤⣖⣤⣤⣄⢢⣤⣤⣤⡀⠄⠰⠀⠆⠀⠀⠠⠀⠆⠠⢀⠢⠐⠆⡀

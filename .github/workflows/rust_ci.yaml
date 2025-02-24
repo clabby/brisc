@@ -9,7 +9,29 @@ env:
 jobs:
   cargo-tests:
     runs-on: ubuntu-latest
+    name: Tests (feature powerset)
     timeout-minutes: 20
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - uses: taiki-e/install-action@just
+      - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@cargo-hack
+      - name: cargo test
+        run: just hack nextest run --workspace --locked --no-tests warn
+
+  cargo-build:
+    runs-on: ubuntu-latest
+    name: Build (feature powerset)
+    timeout-minutes: 20
+    continue-on-error: true
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
@@ -20,19 +42,39 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - uses: taiki-e/install-action@nextest
-      - name: cargo test
-        run: cargo nextest run --release --workspace --all --all-features --locked
+      - uses: taiki-e/install-action@just
+      - uses: taiki-e/install-action@cargo-hack
+      - name: build
+        run: just hack build --workspace --locked
 
-  cargo-lint:
+  cargo-check:
     runs-on: ubuntu-latest
+    name: Check (feature powerset)
     timeout-minutes: 20
-    name: lint
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
         with:
           submodules: true
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+      - uses: taiki-e/install-action@just
+      - uses: taiki-e/install-action@cargo-hack
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - name: cargo hack check
+        run: just hack check
+
+  cargo-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    name: Clippy
+    steps:
+      - name: Checkout sources
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
       - uses: taiki-e/install-action@just
       - name: Install Rust nightly toolchain
         uses: dtolnay/rust-toolchain@nightly
@@ -44,46 +86,9 @@ jobs:
       - name: fmt + lint
         run: just lint
 
-  cargo-build-benches:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    name: build-benchmarks
-    continue-on-error: true
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-        with:
-          submodules: true
-      - uses: taiki-e/install-action@just
-      - name: Install Rust stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-      - name: build benches
-        run: cargo bench --no-run --workspace --all
-
-  cargo-build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-    name: build
-    continue-on-error: true
-    steps:
-      - name: Checkout sources
-        uses: actions/checkout@v4
-        with:
-          submodules: true
-      - uses: taiki-e/install-action@just
-      - name: Install Rust stable toolchain
-        uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-on-failure: true
-      - name: build
-        run: just build
-
   cargo-doc:
     runs-on: ubuntu-latest
+    name: Rustdoc (lint + test)
     timeout-minutes: 20
     steps:
       - name: Checkout sources
@@ -101,24 +106,24 @@ jobs:
       - name: doctest
         run: just test-docs
 
-  cargo-hack-check:
+  cargo-build-benches:
     runs-on: ubuntu-latest
-    name: check (feature powerset)
     timeout-minutes: 20
+    name: Build Benchmarks
+    continue-on-error: true
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: recursive
       - uses: taiki-e/install-action@just
       - name: Install Rust stable toolchain
         uses: dtolnay/rust-toolchain@stable
-      - uses: taiki-e/install-action@cargo-hack
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
-      - name: cargo hack check
-        run: just hack check
+      - name: build benches
+        run: cargo bench --no-run --workspace --all
 
   coverage:
     runs-on: ubuntu-latest
@@ -126,7 +131,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true
+          submodules: recursive
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: llvm-tools-preview
@@ -151,7 +156,7 @@ jobs:
       - name: Record Rust version
         run: echo "RUST=$(rustc --version)" >> "$GITHUB_ENV"
       - name: Upload coverage to codecov.io
-        uses: codecov/codecov-action@v4
+        uses: codecov/codecov-action@v5
         with:
           fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}
