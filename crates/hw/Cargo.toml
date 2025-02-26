@@ -1,6 +1,6 @@
 [package]
 name = "brisc-hw"
-description = "Implementation of the hardware components of a 5-stage RISC-V i{mc} processor."
+description = "Implementation of the hardware components of a 5-stage RISC-V i{mac} processor."
 version = "0.0.1"
 edition.workspace = true
 authors.workspace = true
@@ -26,9 +26,10 @@ cfg-if.workspace = true
 rstest.workspace = true
 
 [features]
-default = ["64-bit", "m", "c"]
+default = ["64-bit", "m", "a", "c"]
 
 # Architecture features
 64-bit = ["brisc-isa/64-bit"]
 m = ["brisc-isa/m"]
+a = ["brisc-isa/a"]
 c = ["brisc-isa/c"]

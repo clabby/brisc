@@ -13,15 +13,20 @@ pub enum PipelineError {
     /// An error occurred while decoding an instruction.
     #[error(transparent)]
     InstructionDecodeError(#[from] InstructionDecodeError),
-    /// Division by zero occurred.
-    #[error("Division by zero")]
-    DivisionByZero,
     /// An error occurred in the memory bus.
     #[error("{0}")]
     MemoryError(MemoryError),
     /// A syscall exception occurred.
     #[error("Syscall exception occurred. Syscall number: {0}")]
     SyscallException(XWord),
+    /// Bad AMO size detected in atomic instruction.
+    #[cfg(feature = "a")]
+    #[error("Bad AMO size: {0}")]
+    BadAmoSize(u8),
+    /// Unaligned atomic memory access.
+    #[cfg(feature = "a")]
+    #[error("Unaligned atomic memory access.")]
+    UnalignedAmo,
 }
 
 /// A [Result] type with [Result::Err] = [PipelineError].

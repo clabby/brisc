@@ -1,6 +1,6 @@
 [package]
 name = "brisc-emu"
-description = "A simple RISC-V i{mc} {64/32}-bit emulator"
+description = "A simple RISC-V i{mac} {64/32}-bit emulator"
 version = "0.0.1"
 edition.workspace = true
 authors.workspace = true
@@ -14,19 +14,19 @@ workspace = true
 
 [dependencies]
 # Local
-brisc-hw = { path = "../hw", default-features = false }
+brisc-hw.workspace = true
 
 # External
 elf = { version = "0.7.4", default-features = false }
 
 [dev-dependencies]
 rstest.workspace = true
-criterion = "0.5"
 
 [features]
-default = ["64-bit", "m", "c"]
+default = ["64-bit", "m", "a", "c"]
 
 # Architecture features
 64-bit = ["brisc-hw/64-bit"]
 m = ["brisc-hw/m"]
+a = ["brisc-hw/a"]
 c = ["brisc-hw/c"]

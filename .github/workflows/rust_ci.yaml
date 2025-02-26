@@ -80,11 +80,12 @@ jobs:
         uses: dtolnay/rust-toolchain@nightly
         with:
           components: rustfmt, clippy
+      - uses: taiki-e/install-action@cargo-hack
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
       - name: fmt + lint
-        run: just lint
+        run: just hack clippy --workspace --all-targets -- -D warnings
 
   cargo-doc:
     runs-on: ubuntu-latest

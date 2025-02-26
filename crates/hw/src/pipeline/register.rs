@@ -29,6 +29,10 @@ bitflags! {
 /// via [PipelineRegister::advance].
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PipelineRegister {
+    /// If the last instruction exited the program, this will be `true`.
+    pub exit: bool,
+    /// The exit code of the program, if it exited.
+    pub exit_code: XWord,
     /// The current program counter.
     pub pc: XWord,
     /// The register file.
@@ -53,10 +57,9 @@ pub struct PipelineRegister {
     pub alu_result: Option<XWord>,
     /// The data read from memory, if any.
     pub memory: Option<XWord>,
-    /// If the last instruction exited the program, this will be `true`.
-    pub exit: bool,
-    /// The exit code of the program, if it exited.
-    pub exit_code: XWord,
+    /// The load reservation address, if any.
+    #[cfg(feature = "a")]
+    pub reservation: Option<Address>,
 }
 
 impl PipelineRegister {
@@ -67,7 +70,13 @@ impl PipelineRegister {
 
     /// Clear the [PipelineRegister] and set the program counter to the next program counter.
     pub fn advance(&mut self) {
-        *self = Self { pc: self.next_pc, registers: self.registers, ..Default::default() };
+        *self = Self {
+            pc: self.next_pc,
+            registers: self.registers,
+            #[cfg(feature = "a")]
+            reservation: self.reservation,
+            ..Default::default()
+        };
     }
 
     /// Computes the effective address of the memory operation if [Self::rs1_value] and

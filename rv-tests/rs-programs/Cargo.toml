@@ -1,0 +1,21 @@
+[package]
+name = "rs-programs"
+version = "0.0.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+syscalls = { git = "https://github.com/jasonwhite/syscalls", default-features = false, features = ["riscv32", "riscv64"] }
+linked_list_allocator = "0.10.5"
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+
+[[bin]]
+name = "fib"
+path = "src/fib.rs"
+
+[[bin]]
+name = "quicksort-heap"
+path = "src/quicksort_heap.rs"

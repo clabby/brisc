@@ -75,5 +75,7 @@ where
             .map_err(|e| e.to_string())?;
     }
 
+    // TODO: Allow for passing a syscall interface, _or_ just make this function
+    // initialize the memory.
     Ok(StEmu::new(elf.ehdr.e_entry as XWord, memory, S::default()))
 }

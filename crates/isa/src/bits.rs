@@ -45,7 +45,7 @@ where
     let index = index.to_usize().expect("index is too large for usize");
     let field_size = T::zero().count_zeros() as usize;
 
-    assert!(index < field_size, "index is too large for sign-extension over the field size");
+    debug_assert!(index < field_size, "index is too large for sign-extension over the field size");
 
     let is_signed = data & (T::one() << index);
     if is_signed == T::zero() {
@@ -91,7 +91,7 @@ mod test {
     #[case(0b1010, 0)]
     #[case(XWord::MAX, (XWord::BITS - 1) as XWord)]
     #[case(0, (XWord::BITS - 1) as XWord)]
-    #[should_panic]
+    #[cfg_attr(debug_assertions, should_panic)]
     #[case(XWord::MAX, 64)]
     fn test_sign_extension_u64_simple(#[case] data: XWord, #[case] index: XWord) {
         if (data >> index) & 1 == 1 {

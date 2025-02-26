@@ -35,6 +35,15 @@ where
         Self { register: PipelineRegister::new(pc), memory, syscall_interface }
     }
 
+    /// Executes the program until it exits, returning the final [PipelineRegister].
+    pub fn run(&mut self) -> PipelineResult<PipelineRegister> {
+        while !self.register.exit {
+            self.cycle()?;
+        }
+
+        Ok(self.register)
+    }
+
     /// Execute a single cycle of the processor in full.
     pub fn cycle(&mut self) -> PipelineResult<()> {
         let r = &mut self.register;
@@ -102,10 +111,14 @@ mod test {
         base_dir = "../../rv-tests/bin",
         rv32ui ~ glob = "rv32ui-p-*",
         rv32um ~ glob = "rv32um-p-*" ~ must_have = ["m"],
+        rv32ua ~ glob = "rv32ua-p-*" ~ must_have = ["a"],
         rv32uc ~ glob = "rv32uc-p-*" ~ must_have = ["c"],
         rv64ui ~ glob = "rv64ui-p-*" ~ must_have = ["64-bit"],
         rv64um ~ glob = "rv64um-p-*" ~ must_have = ["64-bit", "m"],
+        rv64ua ~ glob = "rv64ua-p-*" ~ must_have = ["64-bit", "a"],
         rv64uc ~ glob = "rv64uc-p-*" ~ must_have = ["64-bit", "c"],
+        rs_program_32 ~ glob = "rs-32bit-*" ~ must_have = ["m", "a", "c"],
+        rs_program_64 ~ glob = "rs-64bit-*" ~ must_have = ["64-bit", "m", "a", "c"]
     );
 
     /// Helper function to run a single test case (RISCV standard test suite)
@@ -116,10 +129,14 @@ mod test {
 
         // Run the program until it exits
         let mut clock = 0;
+        let now = std::time::Instant::now();
         while !hart.register.exit {
             hart.cycle().unwrap();
             clock += 1;
         }
+        let elapsed = now.elapsed();
+
+        println!("ips: {}", clock as f64 / elapsed.as_secs_f64());
 
         // Check the exit code
         assert_eq!(
@@ -142,7 +159,7 @@ mod test {
             p_reg: &mut brisc_hw::pipeline::PipelineRegister,
         ) -> PipelineResult<XWord> {
             match sysno {
-                93 => {
+                0x5D => {
                     let exit_code = p_reg.registers[REG_A0 as usize];
                     p_reg.exit_code = exit_code;
                     p_reg.exit = true;

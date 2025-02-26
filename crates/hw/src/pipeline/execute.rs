@@ -3,13 +3,17 @@
 use super::register::PipelineRegister;
 use crate::errors::{PipelineError, PipelineResult};
 use brisc_isa::{
-    sign_extend, BType, BranchFunction, DoubleXWord, EnvironmentFunction, IType,
-    ImmediateArithmeticFunction, Instruction, RegisterArithmeticFunction, SXWord, Word, XWord,
-    SHIFT_MASK, X_LEN,
+    BType, BranchFunction, EnvironmentFunction, IType, ImmediateArithmeticFunction, Instruction,
+    RegisterArithmeticFunction, SXWord, XWord, SHIFT_MASK,
 };
 
 #[cfg(feature = "64-bit")]
-use brisc_isa::{ImmediateArithmeticWordFunction, RegisterArithmeticWordFunction};
+use brisc_isa::{
+    sign_extend, ImmediateArithmeticWordFunction, RegisterArithmeticWordFunction, Word,
+};
+
+#[cfg(feature = "m")]
+use brisc_isa::{DoubleXWord, X_LEN};
 
 /// Execute the ALU stage of the pipeline.
 pub fn execute(p_reg: &mut PipelineRegister) -> PipelineResult<()> {
@@ -58,6 +62,8 @@ pub fn execute(p_reg: &mut PipelineRegister) -> PipelineResult<()> {
         }
         #[cfg(feature = "64-bit")]
         Instruction::RegisterArithmeticWord(_, funct) => execute_reg_arithmetic_word(p_reg, funct)?,
+        #[cfg(feature = "a")]
+        Instruction::Amo(_, _) => 0,
     };
 
     p_reg.alu_result = Some(result);
@@ -130,7 +136,7 @@ fn execute_imm_arithmetic(
     let rs1 = p_reg.rs1_value.ok_or(PipelineError::MissingState("rs1_value"))?;
 
     let res = match funct {
-        ImmediateArithmeticFunction::Addi => i_type.imm + rs1,
+        ImmediateArithmeticFunction::Addi => i_type.imm.wrapping_add(rs1),
         ImmediateArithmeticFunction::Xori => i_type.imm ^ rs1,
         ImmediateArithmeticFunction::Ori => i_type.imm | rs1,
         ImmediateArithmeticFunction::Andi => i_type.imm & rs1,
@@ -154,7 +160,7 @@ fn execute_reg_arithmetic(
     let rs2 = p_reg.rs2_value.ok_or(PipelineError::MissingState("rs2_value"))?;
 
     let result = match funct {
-        RegisterArithmeticFunction::Add => rs1 + rs2,
+        RegisterArithmeticFunction::Add => rs1.wrapping_add(rs2),
         RegisterArithmeticFunction::Sub => rs1.wrapping_sub(rs2),
         RegisterArithmeticFunction::Xor => rs1 ^ rs2,
         RegisterArithmeticFunction::Or => rs1 | rs2,
@@ -180,8 +186,8 @@ fn execute_reg_arithmetic(
         RegisterArithmeticFunction::Mul => rs1 * rs2,
         #[cfg(feature = "m")]
         RegisterArithmeticFunction::Mulh => {
-            let rs1 = sign_extend(rs1 as DoubleXWord, (X_LEN - 1) as DoubleXWord);
-            let rs2 = sign_extend(rs2 as DoubleXWord, (X_LEN - 1) as DoubleXWord);
+            let rs1 = crate::sign_extend(rs1 as DoubleXWord, (X_LEN - 1) as DoubleXWord);
+            let rs2 = crate::sign_extend(rs2 as DoubleXWord, (X_LEN - 1) as DoubleXWord);
             #[cfg(not(feature = "64-bit"))]
             let result = (rs1 as i64).wrapping_mul(rs2 as i64);
             #[cfg(feature = "64-bit")]
@@ -190,7 +196,7 @@ fn execute_reg_arithmetic(
         }
         #[cfg(feature = "m")]
         RegisterArithmeticFunction::Mulhsu => {
-            let rs1 = sign_extend(rs1 as DoubleXWord, (X_LEN - 1) as DoubleXWord);
+            let rs1 = crate::sign_extend(rs1 as DoubleXWord, (X_LEN - 1) as DoubleXWord);
             #[cfg(not(feature = "64-bit"))]
             let result = (rs1 as i64).wrapping_mul(rs2 as u64 as i64);
             #[cfg(feature = "64-bit")]
@@ -254,9 +260,9 @@ fn execute_imm_arithmetic_word(
 
     let result = match funct {
         ImmediateArithmeticWordFunction::Addiw => (i_type.imm as Word) + rs1,
-        ImmediateArithmeticWordFunction::Slliw => rs1 << (i_type.imm & 0x3F),
-        ImmediateArithmeticWordFunction::Srliw => rs1 >> (i_type.imm & 0x3F),
-        ImmediateArithmeticWordFunction::Sraiw => ((rs1 as i32) >> (i_type.imm & 0x3F)) as Word,
+        ImmediateArithmeticWordFunction::Slliw => rs1 << (i_type.imm & 0x1F),
+        ImmediateArithmeticWordFunction::Srliw => rs1 >> (i_type.imm & 0x1F),
+        ImmediateArithmeticWordFunction::Sraiw => ((rs1 as i32) >> (i_type.imm & 0x1F)) as Word,
     };
 
     Ok(sign_extend(result as XWord, 31))

@@ -106,13 +106,13 @@ impl C0 {
     pub fn expand(self) -> Instruction {
         match self {
             Self::CAddi4spn(ciw) => {
-                // C.ADDI4SPN expands to `addi rd', x2, zimm[9:2]`
-                let zimm = twiddle!(XWord, ciw.imm, 2..6, 6..8, 0..1, 1..2) << 2;
+                // C.ADDI4SPN expands to `addi rd', x2, nzuimm[9:2]`
+                let nzuimm = twiddle!(XWord, ciw.imm, 2..4, 4..8, 0..1, 1..2) << 2;
                 let i_type = IType {
                     rd: map_compressed_reg_idx(ciw.rd),
                     funct3: 0,
                     rs1: REG_SP as u8,
-                    imm: zimm,
+                    imm: nzuimm,
                 };
                 Instruction::ImmediateArithmetic(i_type, ImmediateArithmeticFunction::Addi)
             }
@@ -232,7 +232,7 @@ impl C1 {
     pub fn expand(self) -> Instruction {
         match self {
             Self::CAddi(ci) => {
-                // C.ADDI expands to `addi rd', rd', imm[5:0]`
+                // C.ADDI expands to `addi rd, rd, imm[5:0]`
                 let i_type = IType {
                     rd: ci.rs1_rd,
                     funct3: 0,
@@ -243,8 +243,19 @@ impl C1 {
             }
             Self::CJal(cj) => {
                 // C.JAL expands to `jal x1, imm[11:1]`
-                let j_type =
-                    JType { rd: REG_RA as u8, imm: sign_extend((cj.target as XWord) << 1, 11) };
+                let target = twiddle!(
+                    XWord,
+                    cj.target,
+                    10..11,
+                    6..7,
+                    7..9,
+                    4..5,
+                    5..6,
+                    0..1,
+                    9..10,
+                    1..4
+                ) << 1;
+                let j_type = JType { rd: REG_RA as u8, imm: sign_extend(target, 11) };
                 Instruction::Jal(j_type)
             }
             Self::CLi(ci) => {
@@ -279,13 +290,13 @@ impl C1 {
                 let target = twiddle!(
                     XWord,
                     cj.target,
-                    11..12,
-                    7..8,
-                    8..10,
-                    4..5,
-                    3..4,
-                    0..1,
                     10..11,
+                    6..7,
+                    7..9,
+                    4..5,
+                    5..6,
+                    0..1,
+                    9..10,
                     1..4
                 ) << 1;
                 let j_type = JType { rd: REG_ZERO as u8, imm: sign_extend(target, 11) };
@@ -535,35 +546,51 @@ impl C2 {
                     rd: ci.rs1_rd,
                     funct3: 1,
                     rs1: ci.rs1_rd,
-                    imm: (ci.imm & 0x1F) as XWord,
+                    imm: (ci.imm & 0x3F) as XWord,
                 };
                 Instruction::ImmediateArithmetic(i_type, ImmediateArithmeticFunction::Slli)
             }
             Self::CLwsp(ci) => {
                 // C.LWSP expands to `lw rd, offset[7:2](x2)`
-                let i_type =
-                    IType { rd: ci.rs1_rd, funct3: 2, rs1: REG_SP as u8, imm: ci.imm as XWord };
+                let i_type = IType {
+                    rd: ci.rs1_rd,
+                    funct3: 2,
+                    rs1: REG_SP as u8,
+                    imm: twiddle!(XWord, ci.imm as XWord, 0..2, 2..6) << 2,
+                };
                 Instruction::MemoryLoad(i_type, LoadFunction::Lw)
             }
             Self::CSwsp(css) => {
                 // C.SWSP expands to `sw rs2, offset[7:2](x2)`
-                let s_type =
-                    SType { funct3: 2, rs1: REG_SP as u8, rs2: css.rs2, imm: css.imm as XWord };
+                let s_type = SType {
+                    funct3: 2,
+                    rs1: REG_SP as u8,
+                    rs2: css.rs2,
+                    imm: twiddle!(XWord, css.imm as XWord, 0..2, 2..6) << 2,
+                };
                 Instruction::MemoryStore(s_type, StoreFunction::Sw)
             }
             Self::SubFunct(sf) => sf.map(),
             #[cfg(feature = "64-bit")]
             Self::CLdsp(ci) => {
                 // C.LDSP expands to `ld rd, offset[8:3](x2)`
-                let i_type =
-                    IType { rd: ci.rs1_rd, funct3: 3, rs1: REG_SP as u8, imm: ci.imm as XWord };
+                let i_type = IType {
+                    rd: ci.rs1_rd,
+                    funct3: 3,
+                    rs1: REG_SP as u8,
+                    imm: twiddle!(XWord, ci.imm as XWord, 0..3, 3..6) << 3,
+                };
                 Instruction::MemoryLoad(i_type, LoadFunction::Ld)
             }
             #[cfg(feature = "64-bit")]
             Self::CSdsp(css) => {
                 // C.SDSP expands to `sd rs2, offset[8:3](x2)`
-                let s_type =
-                    SType { funct3: 3, rs1: REG_SP as u8, rs2: css.rs2, imm: css.imm as XWord };
+                let s_type = SType {
+                    funct3: 3,
+                    rs1: REG_SP as u8,
+                    rs2: css.rs2,
+                    imm: twiddle!(XWord, css.imm as XWord, 0..3, 3..6) << 3,
+                };
                 Instruction::MemoryStore(s_type, StoreFunction::Sd)
             }
         }

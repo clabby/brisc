@@ -183,13 +183,19 @@ impl TryFrom<&IType> for ImmediateArithmeticFunction {
             0x02 => Ok(Self::Slti),
             0x03 => Ok(Self::Sltiu),
             0x04 => Ok(Self::Xori),
-            0x05 if bits!(u8, value.imm, 5..11) == 0 => Ok(Self::Srli),
-            0x05 if bits!(u8, value.imm, 5..11) == 0x20 => Ok(Self::Srai),
+            #[cfg(not(feature = "64-bit"))]
+            0x05 if bits!(u8, value.imm, 5..12) == 0 => Ok(Self::Srli),
+            #[cfg(not(feature = "64-bit"))]
+            0x05 if bits!(u8, value.imm, 5..12) == 0x20 => Ok(Self::Srai),
+            #[cfg(feature = "64-bit")]
+            0x05 if bits!(u8, value.imm, 6..12) == 0 => Ok(Self::Srli),
+            #[cfg(feature = "64-bit")]
+            0x05 if bits!(u8, value.imm, 6..12) == 0x10 => Ok(Self::Srai),
             0x06 => Ok(Self::Ori),
             0x07 => Ok(Self::Andi),
             _ => Err(InstructionDecodeError::InvalidFunction {
                 q_a: value.funct3,
-                q_b: bits!(u8, value.imm, 5..11),
+                q_b: bits!(u8, value.imm, 5..12),
             }),
         }
     }
@@ -216,12 +222,12 @@ impl TryFrom<&IType> for ImmediateArithmeticWordFunction {
     fn try_from(value: &IType) -> Result<Self, Self::Error> {
         match value.funct3 {
             0x00 => Ok(Self::Addiw),
-            0x01 if bits!(u8, value.imm, 5..11) == 0 => Ok(Self::Slliw),
-            0x05 if bits!(u8, value.imm, 5..11) == 0 => Ok(Self::Srliw),
-            0x05 if bits!(u8, value.imm, 5..11) == 0x20 => Ok(Self::Sraiw),
+            0x01 if bits!(u8, value.imm, 5..12) == 0 => Ok(Self::Slliw),
+            0x05 if bits!(u8, value.imm, 5..12) == 0 => Ok(Self::Srliw),
+            0x05 if bits!(u8, value.imm, 5..12) == 0x20 => Ok(Self::Sraiw),
             _ => Err(InstructionDecodeError::InvalidFunction {
                 q_a: value.funct3,
-                q_b: bits!(u8, value.imm, 5..11),
+                q_b: bits!(u8, value.imm, 5..12),
             }),
         }
     }
@@ -346,6 +352,57 @@ impl TryFrom<&IType> for EnvironmentFunction {
             0x00 if value.imm == 0 => Ok(Self::Ecall),
             _ => Ok(Self::Ebreak),
             // _ => Err(InstructionDecodeError::InvalidFunction { q_a: value.funct3, q_b: 0 }),
+        }
+    }
+}
+
+/// Functions for the "A" extension.
+#[cfg(feature = "a")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AmoFunction {
+    /// The `LR` function.
+    Lr,
+    /// The `SC` function.
+    Sc,
+    /// The `AMOSWAP` function.
+    Amoswap,
+    /// The `AMOADD` function.
+    Amoadd,
+    /// The `AMOXOR` function.
+    Amoxor,
+    /// The `AMOAND` function.
+    Amoand,
+    /// The `AMOOR` function.
+    Amoor,
+    /// The `AMOMIN` function.
+    Amomin,
+    /// The `AMOMAX` function.
+    Amomax,
+    /// The `AMOMINU` function.
+    Amominu,
+    /// The `AMOMAXU` function.
+    Amomaxu,
+}
+
+#[cfg(feature = "a")]
+impl TryFrom<&RType> for AmoFunction {
+    type Error = InstructionDecodeError;
+
+    fn try_from(value: &RType) -> Result<Self, Self::Error> {
+        let afunct5 = bits!(u8, value.funct7, 2..7);
+        match afunct5 {
+            0b00010 => Ok(Self::Lr),
+            0b00011 => Ok(Self::Sc),
+            0b00001 => Ok(Self::Amoswap),
+            0b00000 => Ok(Self::Amoadd),
+            0b00100 => Ok(Self::Amoxor),
+            0b01100 => Ok(Self::Amoand),
+            0b01000 => Ok(Self::Amoor),
+            0b10000 => Ok(Self::Amomin),
+            0b10100 => Ok(Self::Amomax),
+            0b11000 => Ok(Self::Amominu),
+            0b11100 => Ok(Self::Amomaxu),
+            _ => Err(InstructionDecodeError::InvalidFunction { q_a: afunct5, q_b: 0 }),
         }
     }
 }

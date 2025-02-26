@@ -11,4 +11,5 @@ With no features enabled, this crate serves a VM emulating the `rv32i` ISA. Howe
 following features:
 * `64-bit` - Enable the 64-bit RISC-V architecture and accompanying instructions.
 * `m` - Standard Extension for Integer Multiplication and Division.
+* `a` - Standard Extension for Atomic Instructions
 * `c` - Standard Extension for Compressed Instructions.

@@ -8,7 +8,7 @@
 <img src="./assets/banner.png" alt="Brisc" align="right" width="250px" align="center">
 
 Brisc is a collection of libraries that assemble a RISC-V runtime. It is intended for executing single-threaded
-programs targeting the unprivileged `riscv{32/64}i{mc}` ISAs.
+programs targeting the unprivileged `riscv{32/64}i{mac}` ISAs.
 
 ### Development Status
 

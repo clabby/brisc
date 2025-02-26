@@ -1,7 +1,7 @@
 //! RISC-V Instruction Types
 
 use crate::{
-    arch::Word, BranchFunction, EnvironmentFunction, HalfWord, ImmediateArithmeticFunction,
+    arch::Word, BranchFunction, EnvironmentFunction, ImmediateArithmeticFunction,
     InstructionDecodeError, LoadFunction, RegisterArithmeticFunction, StoreFunction, XWord,
 };
 
@@ -63,6 +63,9 @@ pub enum Instruction {
     /// Register arithmetic word operations (RV64I)
     #[cfg(feature = "64-bit")]
     RegisterArithmeticWord(RType, crate::functions::RegisterArithmeticWordFunction) = 0b011_1011,
+    /// AMO operations (RV32A)
+    #[cfg(feature = "a")]
+    Amo(RType, crate::functions::AmoFunction) = 0b010_1111,
 }
 
 impl Instruction {
@@ -80,6 +83,8 @@ impl Instruction {
             Self::ImmediateArithmeticWord(i_type, _) => Some(i_type.rs1),
             #[cfg(feature = "64-bit")]
             Self::RegisterArithmeticWord(r_type, _) => Some(r_type.rs1),
+            #[cfg(feature = "a")]
+            Self::Amo(r_type, _) => Some(r_type.rs1),
             _ => None,
         }
     }
@@ -92,6 +97,8 @@ impl Instruction {
             Self::RegisterArithmetic(r_type, _) => Some(r_type.rs2),
             #[cfg(feature = "64-bit")]
             Self::RegisterArithmeticWord(r_type, _) => Some(r_type.rs2),
+            #[cfg(feature = "a")]
+            Self::Amo(r_type, _) => Some(r_type.rs2),
             _ => None,
         }
     }
@@ -111,6 +118,8 @@ impl Instruction {
             Self::ImmediateArithmeticWord(i_type, _) => Some(i_type.rd),
             #[cfg(feature = "64-bit")]
             Self::RegisterArithmeticWord(r_type, _) => Some(r_type.rd),
+            #[cfg(feature = "a")]
+            Self::Amo(r_type, _) => Some(r_type.rd),
             _ => None,
         }
     }
@@ -147,71 +156,81 @@ impl TryFrom<Word> for Instruction {
         // + map it to the standard instruction if so.
         #[cfg(feature = "c")]
         if is_compressed(value) {
-            return CompressedInstruction::decode(value as HalfWord)
+            return CompressedInstruction::decode(value as crate::HalfWord)
                 .map(CompressedInstruction::expand);
         }
 
         let opcode = (value & 0x7F) as u8;
+
+        // Use a direct jump table based on opcodes for faster dispatch
         match opcode {
             0b000_0011 => {
+                // Memory load operations - decode once and reuse
                 let i_type = IType::decode(value);
-                Ok(Self::MemoryLoad(i_type, LoadFunction::try_from(&i_type)?))
+                LoadFunction::try_from(&i_type).map(|f| Self::MemoryLoad(i_type, f))
             }
             0b010_0011 => {
+                // Memory store operations
                 let s_type = SType::decode(value);
-                Ok(Self::MemoryStore(s_type, StoreFunction::try_from(&s_type)?))
+                StoreFunction::try_from(&s_type).map(|f| Self::MemoryStore(s_type, f))
             }
             0b110_0011 => {
+                // Branch operations
                 let b_type = BType::decode(value);
-                Ok(Self::Branch(b_type, BranchFunction::try_from(&b_type)?))
+                BranchFunction::try_from(&b_type).map(|f| Self::Branch(b_type, f))
             }
             0b001_0011 => {
+                // Immediate arithmetic operations
                 let i_type = IType::decode(value);
-                Ok(Self::ImmediateArithmetic(
-                    i_type,
-                    ImmediateArithmeticFunction::try_from(&i_type)?,
-                ))
+                ImmediateArithmeticFunction::try_from(&i_type)
+                    .map(|f| Self::ImmediateArithmetic(i_type, f))
             }
             0b011_0011 => {
+                // Register arithmetic operations
                 let r_type = RType::decode(value);
-                Ok(Self::RegisterArithmetic(r_type, RegisterArithmeticFunction::try_from(&r_type)?))
+                RegisterArithmeticFunction::try_from(&r_type)
+                    .map(|f| Self::RegisterArithmetic(r_type, f))
             }
             0b011_0111 => {
-                let u_type = UType::decode(value);
-                Ok(Self::Lui(u_type))
+                // LUI - simple U-type, no additional function decode
+                Ok(Self::Lui(UType::decode(value)))
             }
             0b001_0111 => {
-                let u_type = UType::decode(value);
-                Ok(Self::Auipc(u_type))
+                // AUIPC - simple U-type, no additional function decode
+                Ok(Self::Auipc(UType::decode(value)))
             }
             0b110_1111 => {
-                let j_type = JType::decode(value);
-                Ok(Self::Jal(j_type))
+                // JAL - simple J-type, no additional function decode
+                Ok(Self::Jal(JType::decode(value)))
             }
             0b110_0111 => {
-                let i_type = IType::decode(value);
-                Ok(Self::Jalr(i_type))
+                // JALR - simple I-type, no additional function decode
+                Ok(Self::Jalr(IType::decode(value)))
             }
             0b111_0011 => {
+                // Environment calls
                 let i_type = IType::decode(value);
-                Ok(Self::Environment(i_type, EnvironmentFunction::try_from(&i_type)?))
+                EnvironmentFunction::try_from(&i_type).map(|f| Self::Environment(i_type, f))
             }
             0b000_1111 => Ok(Self::Fence),
+
+            // Feature-gated instructions
             #[cfg(feature = "64-bit")]
             0b001_1011 => {
                 let i_type = IType::decode(value);
-                Ok(Self::ImmediateArithmeticWord(
-                    i_type,
-                    crate::functions::ImmediateArithmeticWordFunction::try_from(&i_type)?,
-                ))
+                crate::functions::ImmediateArithmeticWordFunction::try_from(&i_type)
+                    .map(|f| Self::ImmediateArithmeticWord(i_type, f))
             }
             #[cfg(feature = "64-bit")]
             0b011_1011 => {
                 let r_type = RType::decode(value);
-                Ok(Self::RegisterArithmeticWord(
-                    r_type,
-                    crate::functions::RegisterArithmeticWordFunction::try_from(&r_type)?,
-                ))
+                crate::functions::RegisterArithmeticWordFunction::try_from(&r_type)
+                    .map(|f| Self::RegisterArithmeticWord(r_type, f))
+            }
+            #[cfg(feature = "a")]
+            0b010_1111 => {
+                let r_type = RType::decode(value);
+                crate::functions::AmoFunction::try_from(&r_type).map(|f| Self::Amo(r_type, f))
             }
             _ => Err(InstructionDecodeError::InvalidOpcode(opcode)),
         }

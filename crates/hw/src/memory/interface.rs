@@ -268,7 +268,7 @@ pub trait Memory {
         let total = (self.page_count() * PAGE_SIZE) as u64;
         const UNIT: u64 = 1024;
         if total < UNIT {
-            return format!("{} B", total);
+            return format!("{total} B");
         }
         let mut div = UNIT;
         let mut exp = 0;

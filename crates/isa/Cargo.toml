@@ -1,6 +1,6 @@
 [package]
 name = "brisc-isa"
-description = "Types and decoding utilities for the RISC-V {32/64} i{mc} ISA"
+description = "Types and decoding utilities for the RISC-V {32/64} i{mac} ISA"
 version = "0.0.1"
 edition.workspace = true
 authors.workspace = true
@@ -21,7 +21,8 @@ num-traits.workspace = true
 rstest.workspace = true
 
 [features]
-default = ["64-bit", "m", "c"]
+default = ["64-bit", "m", "a", "c"]
 64-bit = []
 m = []
+a = []
 c = []
