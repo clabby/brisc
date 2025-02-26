@@ -51,13 +51,13 @@ target "rust-riscv32imc-cross" {
   platforms = split(",", PLATFORMS)
 }
 
-target "rust-riscv64imc-cross" {
+target "rust-riscv32imac-cross" {
   inherits = ["docker-metadata-action"]
   context = "."
   dockerfile = "docker/rust-riscv-cross.dockerfile"
   args = {
-    ARCH = "riscv64imac",
-    TARGET_FEATURES = "-a"
+    ARCH = "riscv32imac",
+    TARGET_FEATURES = ""
   }
   platforms = split(",", PLATFORMS)
 }
@@ -80,6 +80,17 @@ target "rust-riscv64imc-cross" {
   args = {
     ARCH = "riscv64imac",
     TARGET_FEATURES = "-a"
+  }
+  platforms = split(",", PLATFORMS)
+}
+
+target "rust-riscv64imac-cross" {
+  inherits = ["docker-metadata-action"]
+  context = "."
+  dockerfile = "docker/rust-riscv-cross.dockerfile"
+  args = {
+    ARCH = "riscv64imac",
+    TARGET_FEATURES = ""
   }
   platforms = split(",", PLATFORMS)
 }
