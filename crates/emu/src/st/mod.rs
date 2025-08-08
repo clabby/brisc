@@ -1,9 +1,9 @@
 //! Single-threaded, single-cycle 5-stage RISC-V pipeline.
 
+use crate::cfg::EmuConfig;
 use brisc_hw::{
     errors::{PipelineError, PipelineResult},
     linux::SyscallInterface,
-    memory::Memory,
     pipeline::{
         decode_instruction, execute, instruction_fetch, mem_access, writeback, PipelineRegister,
     },
@@ -12,26 +12,28 @@ use brisc_hw::{
 
 /// Single-cycle RISC-V processor emulator.
 #[derive(Debug, Default)]
-pub struct StEmu<M, S = ()>
+pub struct StEmu<Config>
 where
-    M: Memory + Default,
-    S: SyscallInterface + Default,
+    Config: EmuConfig,
 {
     /// The pipeline register.
     pub register: PipelineRegister,
     /// The device memory.
-    pub memory: M,
+    pub memory: Config::Memory,
     /// The system call interface.
-    pub syscall_interface: S,
+    pub syscall_interface: Config::SyscallInterface,
 }
 
-impl<M, S> StEmu<M, S>
+impl<Config> StEmu<Config>
 where
-    M: Memory + Clone + Default,
-    S: SyscallInterface + Default,
+    Config: EmuConfig,
 {
     /// Create a new [StEmu] with the given [Memory].
-    pub fn new(pc: XWord, memory: M, syscall_interface: S) -> Self {
+    pub fn new(
+        pc: XWord,
+        memory: Config::Memory,
+        syscall_interface: Config::SyscallInterface,
+    ) -> Self {
         Self { register: PipelineRegister::new(pc), memory, syscall_interface }
     }
 
@@ -76,36 +78,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::elf::load_elf;
-    use brisc_hw::{
-        errors::PipelineResult,
-        linux::SyscallInterface,
-        memory::{Memory, SimpleMemory},
-        XWord, REG_A0,
-    };
-    use rstest::rstest;
-    use std::{fs, path::PathBuf};
-
-    /// Creates a set of Rust tests for the RISC-V test suites passed.
-    macro_rules! test_suites {
-        (
-            base_dir = $base_dir:literal,
-            $($name:ident ~ glob = $glob:literal$( ~ must_have = [$($feature:literal$(,)?)+])?$(,)?)+
-        ) => {
-            $(
-                #[rstest]
-                $(#[cfg(all($(feature = $feature,)+))])?
-                fn $name(
-                    #[base_dir = $base_dir]
-                    #[files($glob)]
-                    #[exclude("\\.dump$")]
-                    path: PathBuf,
-                ) {
-                    run_riscv_test(&path);
-                }
-            )+
-        }
-    }
+    use crate::test_suites;
 
     test_suites!(
         base_dir = "../../rv-tests/bin",
@@ -120,54 +93,4 @@ mod test {
         rs_program_32 ~ glob = "rs-32bit-*" ~ must_have = ["m", "a", "c"],
         rs_program_64 ~ glob = "rs-64bit-*" ~ must_have = ["64-bit", "m", "a", "c"]
     );
-
-    /// Helper function to run a single test case (RISCV standard test suite)
-    fn run_riscv_test(test_path: &PathBuf) {
-        // Load the program
-        let elf_bytes = fs::read(test_path).unwrap();
-        let mut hart = load_elf::<SimpleMemory, RiscvTestSyscalls>(&elf_bytes).unwrap();
-
-        // Run the program until it exits
-        let mut clock = 0;
-        let now = std::time::Instant::now();
-        while !hart.register.exit {
-            hart.cycle().unwrap();
-            clock += 1;
-        }
-        let elapsed = now.elapsed();
-
-        println!("ips: {}", clock as f64 / elapsed.as_secs_f64());
-
-        // Check the exit code
-        assert_eq!(
-            hart.register.exit_code,
-            0,
-            "Test failed: {:?} | Failing Test #: {} | clock: {clock}",
-            test_path.file_name().unwrap(),
-            hart.register.exit_code >> 1,
-        );
-    }
-
-    #[derive(Default)]
-    struct RiscvTestSyscalls;
-
-    impl SyscallInterface for RiscvTestSyscalls {
-        fn syscall<M: Memory>(
-            &mut self,
-            sysno: XWord,
-            _: &mut M,
-            p_reg: &mut brisc_hw::pipeline::PipelineRegister,
-        ) -> PipelineResult<XWord> {
-            match sysno {
-                0x5D => {
-                    let exit_code = p_reg.registers[REG_A0 as usize];
-                    p_reg.exit_code = exit_code;
-                    p_reg.exit = true;
-                }
-                _ => unimplemented!(),
-            }
-
-            Ok(0)
-        }
-    }
 }

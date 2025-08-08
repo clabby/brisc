@@ -17,13 +17,17 @@ workspace = true
 brisc-hw.workspace = true
 
 # External
-elf = { version = "0.7.4", default-features = false }
+elf = { version = "0.8.0", default-features = false }
+
+# `test-utils` feature
+rstest = { workspace = true, optional = true }
 
 [dev-dependencies]
 rstest.workspace = true
 
 [features]
 default = ["64-bit", "m", "a", "c"]
+test-utils = ["dep:rstest"]
 
 # Architecture features
 64-bit = ["brisc-hw/64-bit"]
