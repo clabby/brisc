@@ -24,6 +24,7 @@ rstest = { workspace = true, optional = true }
 
 [dev-dependencies]
 rstest.workspace = true
+criterion.workspace = true
 
 [features]
 default = ["64-bit", "m", "a", "c"]
@@ -34,3 +35,8 @@ test-utils = ["dep:rstest"]
 m = ["brisc-hw/m"]
 a = ["brisc-hw/a"]
 c = ["brisc-hw/c"]
+
+[[bench]]
+harness = false
+name = "emu"
+path = "benches/bench.rs"

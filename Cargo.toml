@@ -41,13 +41,14 @@ brisc-emu = { path = "crates/hw", default-features = false }
 
 # External
 cfg-if = "1.0.0"
+hashbrown = "0.15"
 bitflags = { version = "2.6.0", default-features = false }
 thiserror = { version = "2.0.11", default-features = false }
-hashbrown = "0.15"
 num-traits = { version = "0.2", default-features = false }
 
 # Testing + Benchmarking
-rstest = "0.25.0"
+rstest = "0.26.0"
+criterion = "0.5.1"
 
 [profile.dev]
 opt-level = 1

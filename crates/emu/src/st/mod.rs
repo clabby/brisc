@@ -28,7 +28,9 @@ impl<Config> StEmu<Config>
 where
     Config: EmuConfig,
 {
-    /// Create a new [StEmu] with the given [Memory].
+    /// Create a new [StEmu] with the given [Memory] and [SyscallInterface].
+    ///
+    /// [Memory]: brisc_hw::memory::Memory
     pub fn new(
         pc: XWord,
         memory: Config::Memory,

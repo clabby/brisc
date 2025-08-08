@@ -33,7 +33,7 @@ macro_rules! test_suites {
 }
 
 /// Helper function to run a single test case
-pub fn run_riscv_test(test_path: &PathBuf) {
+pub fn run_riscv_test(test_path: &PathBuf) -> f64 {
     // Load the program
     let elf_bytes = fs::read(test_path).unwrap();
     let mut hart = load_elf::<TestStEmuConfig>(&elf_bytes).unwrap();
@@ -47,7 +47,8 @@ pub fn run_riscv_test(test_path: &PathBuf) {
     }
     let elapsed = now.elapsed();
 
-    println!("ips: {}", clock as f64 / elapsed.as_secs_f64());
+    let ips = clock as f64 / elapsed.as_secs_f64();
+    println!("ips: {ips}");
 
     // Check the exit code
     assert_eq!(
@@ -57,6 +58,8 @@ pub fn run_riscv_test(test_path: &PathBuf) {
         test_path.file_name().unwrap(),
         hart.register.exit_code >> 1,
     );
+
+    ips
 }
 
 #[derive(Default)]
