@@ -3,12 +3,14 @@
 use crate::cfg::EmuConfig;
 use brisc_hw::{
     errors::{PipelineError, PipelineResult},
-    linux::SyscallInterface,
+    kernel::Kernel,
     pipeline::{
         decode_instruction, execute, instruction_fetch, mem_access, writeback, PipelineRegister,
     },
-    XWord,
 };
+
+mod builder;
+pub use builder::StEmuBuilder;
 
 /// Single-cycle RISC-V processor emulator.
 #[derive(Debug, Default)]
@@ -21,22 +23,16 @@ where
     /// The device memory.
     pub memory: Config::Memory,
     /// The system call interface.
-    pub syscall_interface: Config::SyscallInterface,
+    pub kernel: Config::Kernel,
 }
 
 impl<Config> StEmu<Config>
 where
     Config: EmuConfig,
 {
-    /// Create a new [StEmu] with the given [Memory] and [SyscallInterface].
-    ///
-    /// [Memory]: brisc_hw::memory::Memory
-    pub fn new(
-        pc: XWord,
-        memory: Config::Memory,
-        syscall_interface: Config::SyscallInterface,
-    ) -> Self {
-        Self { register: PipelineRegister::new(pc), memory, syscall_interface }
+    /// Creates a new [`StEmuBuilder`].
+    pub fn builder() -> StEmuBuilder<Config> {
+        StEmuBuilder::default()
     }
 
     /// Executes the program until it exits, returning the final [PipelineRegister].
@@ -49,6 +45,7 @@ where
     }
 
     /// Execute a single cycle of the processor in full.
+    #[inline(always)]
     pub fn cycle(&mut self) -> PipelineResult<()> {
         let r = &mut self.register;
 
@@ -61,8 +58,9 @@ where
 
         // Handle system calls.
         match cycle_res {
+            Ok(()) => {}
             Err(PipelineError::SyscallException(syscall_no)) => {
-                self.syscall_interface.syscall(syscall_no, &mut self.memory, r)?;
+                self.kernel.syscall(syscall_no, &mut self.memory, r)?;
 
                 // Exit emulation if the syscall terminated the program.
                 if r.exit {
@@ -70,7 +68,6 @@ where
                 }
             }
             Err(e) => return Err(e),
-            _ => {}
         }
 
         r.advance();

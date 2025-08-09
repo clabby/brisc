@@ -8,7 +8,7 @@
 extern crate alloc;
 
 pub mod errors;
-pub mod linux;
+pub mod kernel;
 pub mod memory;
 pub mod pipeline;
 

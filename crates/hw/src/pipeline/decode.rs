@@ -23,8 +23,6 @@ pub fn decode_instruction(register: &mut PipelineRegister) -> PipelineResult<()>
     // Set the decoded instruction in the pipeline register.
     register.instruction = Some(instruction);
 
-    // TODO: Assign control signals.
-
     // Throw an interrupt if the instruction is a system call.
     if instruction.is_system_call() {
         return Err(PipelineError::SyscallException(register.registers[REG_A7 as usize]));

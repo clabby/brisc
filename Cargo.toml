@@ -25,7 +25,6 @@ unnameable-types = "warn"
 all = "warn"
 
 [workspace.lints.clippy]
-needless-return = "allow" # Temporary fix since this is breaking in nightly clippy
 all = { level = "warn", priority = -1 }
 missing-const-for-fn = "warn"
 use-self = "warn"
@@ -42,7 +41,6 @@ brisc-emu = { path = "crates/hw", default-features = false }
 # External
 cfg-if = "1.0.0"
 hashbrown = "0.15"
-bitflags = { version = "2.6.0", default-features = false }
 thiserror = { version = "2.0.11", default-features = false }
 num-traits = { version = "0.2", default-features = false }
 

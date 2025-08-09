@@ -1,6 +1,5 @@
 //! ELF file loading utilities.
 
-use crate::{cfg::EmuConfig, st::StEmu};
 use alloc::{
     format,
     string::{String, ToString},
@@ -11,21 +10,21 @@ use brisc_hw::{
 };
 use elf::{abi::PT_LOAD, endian::AnyEndian, ElfBytes};
 
-/// Load a raw ELF file into a [StEmu] object.
+/// Load a raw ELF file into a fresh instance of [`Memory`].
 ///
 /// ### Takes
 /// - `raw`: The raw contents of the ELF file to load.
 ///
 /// ### Returns
-/// - `Ok(state)` if the ELF file was loaded successfully
+/// - `Ok((memory, entry_pc))` if the ELF file was loaded successfully
 /// - `Err(_)` if the ELF file could not be loaded
-pub fn load_elf<Config>(raw: &[u8]) -> Result<StEmu<Config>, String>
+pub fn load_elf<M>(raw: &[u8]) -> Result<(M, XWord), String>
 where
-    Config: EmuConfig<Memory: Default, SyscallInterface: Default>,
+    M: Memory + Default,
 {
     let elf = ElfBytes::<AnyEndian>::minimal_parse(raw)
         .map_err(|e| format!("Failed to parse ELF file: {e}"))?;
-    let mut memory = Config::Memory::default();
+    let mut memory = M::default();
 
     let headers = elf.segments().ok_or("Failed to load section headers")?;
     for (i, header) in headers.iter().enumerate() {
@@ -73,7 +72,5 @@ where
             .map_err(|e| e.to_string())?;
     }
 
-    // TODO: Allow for passing a syscall interface, _or_ just make this function
-    // initialize the memory.
-    Ok(StEmu::new(elf.ehdr.e_entry as XWord, memory, Config::SyscallInterface::default()))
+    Ok((memory, elf.ehdr.e_entry as XWord))
 }

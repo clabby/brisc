@@ -17,7 +17,6 @@ workspace = true
 brisc-isa.workspace = true
 
 # External
-bitflags.workspace = true
 thiserror.workspace = true
 hashbrown.workspace = true
 cfg-if.workspace = true

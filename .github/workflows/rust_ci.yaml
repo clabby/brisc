@@ -69,7 +69,7 @@ jobs:
   cargo-lint:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    name: Clippy
+    name: Clippy (feature powerset)
     steps:
       - name: Checkout sources
         uses: actions/checkout@v4

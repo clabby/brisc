@@ -1,10 +1,11 @@
 //! Test utilities for the emulator crate.
 
-use crate::{cfg::EmuConfig, elf::load_elf};
+use crate::{cfg::EmuConfig, st::StEmu};
 use brisc_hw::{
     errors::PipelineResult,
-    linux::SyscallInterface,
+    kernel::Kernel,
     memory::{Memory, SimpleMemory},
+    pipeline::PipelineRegister,
     XWord, REG_A0,
 };
 use rstest as _;
@@ -36,7 +37,11 @@ macro_rules! test_suites {
 pub fn run_riscv_test(test_path: &PathBuf) -> f64 {
     // Load the program
     let elf_bytes = fs::read(test_path).unwrap();
-    let mut hart = load_elf::<TestStEmuConfig>(&elf_bytes).unwrap();
+    let mut hart = StEmu::<TestStEmuConfig>::builder()
+        .with_kernel(RiscvTestKernel)
+        .with_elf(&elf_bytes)
+        .unwrap()
+        .build();
 
     // Run the program until it exits
     let mut clock = 0;
@@ -45,9 +50,8 @@ pub fn run_riscv_test(test_path: &PathBuf) -> f64 {
         hart.cycle().unwrap();
         clock += 1;
     }
-    let elapsed = now.elapsed();
 
-    let ips = clock as f64 / elapsed.as_secs_f64();
+    let ips = clock as f64 / now.elapsed().as_secs_f64();
     println!("ips: {ips}");
 
     // Check the exit code
@@ -68,20 +72,18 @@ struct TestStEmuConfig;
 impl EmuConfig for TestStEmuConfig {
     type Memory = SimpleMemory;
 
-    type SyscallInterface = RiscvTestSyscalls;
-
-    type ExternalConfig = ();
+    type Kernel = RiscvTestKernel;
 }
 
 #[derive(Default)]
-struct RiscvTestSyscalls;
+struct RiscvTestKernel;
 
-impl SyscallInterface for RiscvTestSyscalls {
+impl Kernel for RiscvTestKernel {
     fn syscall<M: Memory>(
         &mut self,
         sysno: XWord,
         _: &mut M,
-        p_reg: &mut brisc_hw::pipeline::PipelineRegister,
+        p_reg: &mut PipelineRegister,
     ) -> PipelineResult<XWord> {
         match sysno {
             0x5D => {
