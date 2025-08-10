@@ -21,14 +21,18 @@ elf = { version = "0.8.0", default-features = false }
 
 # `test-utils` feature
 rstest = { workspace = true, optional = true }
+tracing = { workspace = true, optional = true }
+tracing-subscriber = { workspace = true, optional = true }
 
 [dev-dependencies]
+tracing.workspace = true
+tracing-subscriber.workspace = true
 rstest.workspace = true
 criterion.workspace = true
 
 [features]
 default = [ "64-bit", "a", "c", "m" ]
-test-utils = [ "dep:rstest" ]
+test-utils = [ "dep:rstest", "dep:tracing", "dep:tracing-subscriber" ]
 
 # Architecture features
 64-bit = [ "brisc-hw/64-bit" ]

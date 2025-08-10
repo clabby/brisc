@@ -60,6 +60,6 @@ impl PipelineRegister {
     /// Computes the effective address of the memory operation if [Self::rs1_value] and
     /// [Self::immediate] are [Some].
     pub fn effective_address(&self) -> Option<Address> {
-        self.rs1_value.and_then(|rs1| self.immediate.map(|imm| rs1 + imm))
+        self.rs1_value.and_then(|rs1| self.immediate.map(|imm| rs1.wrapping_add(imm)))
     }
 }

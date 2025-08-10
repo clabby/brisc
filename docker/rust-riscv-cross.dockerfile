@@ -19,7 +19,6 @@ RUN apt-get update && apt-get install --assume-yes --no-install-recommends \
   make \
   cmake \
   xxd \
-  python3 \
   g++-riscv64-linux-gnu \
   libc6-dev-riscv64-cross \
   binutils-riscv64-linux-gnu \
