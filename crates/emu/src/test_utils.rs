@@ -6,27 +6,36 @@ use brisc_hw::{
     kernel::Kernel,
     memory::{Memory, SimpleMemory},
     pipeline::PipelineRegister,
-    XWord, REG_A0,
+    XWord, REG_A0, REG_A1, REG_A2,
 };
-use rstest as _;
 use std::{fs, path::PathBuf};
+
+use rstest as _;
+use tracing_subscriber as _;
 
 /// Creates a set of Rust tests for the RISC-V test suites passed.
 #[macro_export]
 macro_rules! test_suites {
     (
         base_dir = $base_dir:literal,
-        $($name:ident ~ glob = $glob:literal$( ~ must_have = [$($feature:literal$(,)?)+])?$(,)?)+
+        $($name:ident ~ glob = $glob:literal$( ~ must_have = [$($feature:literal$(,)?)+])?$( ~ must_not_have = [$($no_feature:literal$(,)?)+])?$(,)?)+
     ) => {
         $(
             #[rstest::rstest]
             $(#[cfg(all($(feature = $feature,)+))])?
+            $(#[cfg(all(not($(feature = $no_feature,)+)))])?
             fn $name(
                 #[base_dir = $base_dir]
                 #[files($glob)]
                 #[exclude("\\.dump$")]
                 path: std::path::PathBuf,
             ) {
+                // Init global tracing subscriber
+                tracing_subscriber::fmt()
+                    .with_max_level(tracing::Level::DEBUG)
+                    .init();
+                tracing::info!(target: "test-runner", "Running test: {:?}", path.file_name().unwrap());
+
                 $crate::test_utils::run_riscv_test(&path);
             }
         )+
@@ -52,7 +61,7 @@ pub fn run_riscv_test(test_path: &PathBuf) -> f64 {
     }
 
     let ips = clock as f64 / now.elapsed().as_secs_f64();
-    println!("ips: {ips}");
+    tracing::info!(target: "test-runner", "ips: {ips}");
 
     // Check the exit code
     assert_eq!(
@@ -82,7 +91,7 @@ impl Kernel for RiscvTestKernel {
     fn syscall<M: Memory>(
         &mut self,
         sysno: XWord,
-        _: &mut M,
+        mem: &mut M,
         p_reg: &mut PipelineRegister,
     ) -> PipelineResult<XWord> {
         match sysno {
@@ -90,6 +99,20 @@ impl Kernel for RiscvTestKernel {
                 let exit_code = p_reg.registers[REG_A0 as usize];
                 p_reg.exit_code = exit_code;
                 p_reg.exit = true;
+            }
+            0x40 => {
+                let fd = p_reg.registers[REG_A0 as usize];
+                let ptr = p_reg.registers[REG_A1 as usize];
+                let len = p_reg.registers[REG_A2 as usize];
+
+                let raw_msg = mem.read_memory_range(ptr, len).unwrap();
+                let msg = String::from_utf8_lossy(&raw_msg);
+
+                if fd == 1 {
+                    tracing::info!(target: "test-runner", "stdout: {}", msg);
+                } else if fd == 2 {
+                    tracing::error!(target: "test-runner", "stderr: {}", msg);
+                }
             }
             _ => unimplemented!(),
         }

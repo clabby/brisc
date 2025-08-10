@@ -3,7 +3,7 @@
 use crate::memory::{
     MemoryResult, Page, PageIndex, PAGE_ADDRESS_MASK, PAGE_ADDRESS_SIZE, PAGE_SIZE,
 };
-use alloc::{format, string::String};
+use alloc::{format, string::String, vec::Vec};
 use brisc_isa::{Byte, DoubleWord, HalfWord, Word, XWord};
 
 /// Length (in bytes) of a [HalfWord].
@@ -261,6 +261,38 @@ pub trait Memory {
         }
 
         Ok(())
+    }
+
+    /// Read a range of memory at a given [Address].
+    ///
+    /// ## Takes
+    /// - `address`: The address to set the memory at.
+    /// - `len`: The number of bytes to read.
+    ///
+    /// ## Returns
+    /// - `Ok(())` if the memory was successfully read.
+    /// - `Err(_)` if the memory could not be read.
+    fn read_memory_range(&mut self, address: Address, len: XWord) -> MemoryResult<Vec<u8>> {
+        let mut data = Vec::with_capacity(len as usize);
+
+        let mut address = address;
+        while data.len() < len as usize {
+            let page_index = address >> PAGE_ADDRESS_SIZE as u64;
+            let page_address = address as usize & PAGE_ADDRESS_MASK;
+
+            let page = if let Some(page) = self.page(page_index) {
+                page
+            } else {
+                return Err(super::MemoryError::PageNotFound(page_index));
+            };
+
+            let read_len = (len as usize - data.len()).min(PAGE_SIZE - page_address);
+            data.extend_from_slice(&page[page_address..page_address + read_len]);
+
+            address += read_len as Address;
+        }
+
+        Ok(data)
     }
 
     /// Returns a human-readable string describing the size of the [Memory].

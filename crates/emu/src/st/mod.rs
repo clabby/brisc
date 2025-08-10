@@ -89,7 +89,7 @@ mod test {
         rv64um ~ glob = "rv64um-p-*" ~ must_have = ["64-bit", "m"],
         rv64ua ~ glob = "rv64ua-p-*" ~ must_have = ["64-bit", "a"],
         rv64uc ~ glob = "rv64uc-p-*" ~ must_have = ["64-bit", "c"],
-        rs_program_32 ~ glob = "rs-32bit-*" ~ must_have = ["m", "a", "c"],
+        rs_program_32 ~ glob = "rs-32bit-*" ~ must_have = ["m", "a", "c"] ~ must_not_have = ["64-bit"],
         rs_program_64 ~ glob = "rs-64bit-*" ~ must_have = ["64-bit", "m", "a", "c"]
     );
 }

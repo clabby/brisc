@@ -107,7 +107,7 @@ impl C0 {
         match self {
             Self::CAddi4spn(ciw) => {
                 // C.ADDI4SPN expands to `addi rd', x2, nzuimm[9:2]`
-                let nzuimm = twiddle!(XWord, ciw.imm, 2..4, 4..8, 0..1, 1..2) << 2;
+                let nzuimm = twiddle!(XWord, ciw.imm, 2..6, 6..8, 0..1, 1..2) << 2;
                 let i_type = IType {
                     rd: map_compressed_reg_idx(ciw.rd),
                     funct3: 0,
@@ -403,7 +403,7 @@ impl C1SubFunct {
                     rd: map_compressed_reg_idx(cb.rs1),
                     funct3: 0b101,
                     rs1: map_compressed_reg_idx(cb.rs1),
-                    imm: twiddle!(XWord, cb.offset, 7..8, 0..5),
+                    imm: sign_extend(twiddle!(XWord, cb.offset, 7..8, 0..5), 5),
                 };
                 Instruction::ImmediateArithmetic(i_type, ImmediateArithmeticFunction::Srli)
             }
@@ -413,7 +413,7 @@ impl C1SubFunct {
                     rd: map_compressed_reg_idx(cb.rs1),
                     funct3: 0b101,
                     rs1: map_compressed_reg_idx(cb.rs1),
-                    imm: twiddle!(XWord, cb.offset, 7..8, 0..5) | (0x20 << 5),
+                    imm: sign_extend(twiddle!(XWord, cb.offset, 7..8, 0..5) | (0x20 << 5), 5),
                 };
                 Instruction::ImmediateArithmetic(i_type, ImmediateArithmeticFunction::Srai)
             }
@@ -546,7 +546,7 @@ impl C2 {
                     rd: ci.rs1_rd,
                     funct3: 1,
                     rs1: ci.rs1_rd,
-                    imm: (ci.imm & 0x3F) as XWord,
+                    imm: sign_extend(ci.imm as XWord, 5),
                 };
                 Instruction::ImmediateArithmetic(i_type, ImmediateArithmeticFunction::Slli)
             }
