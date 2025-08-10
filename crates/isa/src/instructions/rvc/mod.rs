@@ -201,7 +201,7 @@ impl C1 {
                     // In 64-bit mode, C.ADDIW is used instead of C.JAL.
                     if #[cfg(feature = "64-bit")] {
                         if rs1_rd == 0 {
-                            return Err(InstructionDecodeError::InvalidFunction { q_a: funct3, q_b: 0 });
+                            Err(InstructionDecodeError::InvalidFunction { q_a: funct3, q_b: 0 })
                         } else {
                             Ok(Self::CAddiw(CIType::decode(instruction)))
                         }

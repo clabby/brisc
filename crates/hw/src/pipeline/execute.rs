@@ -49,8 +49,7 @@ pub fn execute(p_reg: &mut PipelineRegister) -> PipelineResult<()> {
         }
         Instruction::Environment(_i_type, funct) => {
             if matches!(funct, EnvironmentFunction::Ecall) {
-                // TODO: Fix; Needs to be a0
-                return Err(PipelineError::SyscallException(p_reg.registers[0]));
+                unreachable!("Ecall should be handled in the decode stage");
             } else {
                 // no-op EBREAK operations.
                 0
