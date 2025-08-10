@@ -21,7 +21,7 @@ num-traits.workspace = true
 rstest.workspace = true
 
 [features]
-default = ["64-bit", "m", "a", "c"]
+default = [ "64-bit", "a", "c", "m" ]
 64-bit = []
 m = []
 a = []

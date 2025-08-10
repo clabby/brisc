@@ -25,10 +25,10 @@ cfg-if.workspace = true
 rstest.workspace = true
 
 [features]
-default = ["64-bit", "m", "a", "c"]
+default = [ "64-bit", "a", "c", "m" ]
 
 # Architecture features
-64-bit = ["brisc-isa/64-bit"]
-m = ["brisc-isa/m"]
-a = ["brisc-isa/a"]
-c = ["brisc-isa/c"]
+64-bit = [ "brisc-isa/64-bit" ]
+m = [ "brisc-isa/m" ]
+a = [ "brisc-isa/a" ]
+c = [ "brisc-isa/c" ]

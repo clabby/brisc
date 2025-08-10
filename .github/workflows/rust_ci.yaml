@@ -168,3 +168,20 @@ jobs:
         uses: codecov/test-results-action@v1
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
+
+  zepter:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: true
+      - name: Install zepter
+        run: |
+          cargo install zepter -f --locked
+          zepter --version
+      - name: Format features
+        run: |
+          zepter format features
+      - name: Lint features
+        run: |
+          zepter
