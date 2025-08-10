@@ -27,14 +27,14 @@ rstest.workspace = true
 criterion.workspace = true
 
 [features]
-default = ["64-bit", "m", "a", "c"]
-test-utils = ["dep:rstest"]
+default = [ "64-bit", "a", "c", "m" ]
+test-utils = [ "dep:rstest" ]
 
 # Architecture features
-64-bit = ["brisc-hw/64-bit"]
-m = ["brisc-hw/m"]
-a = ["brisc-hw/a"]
-c = ["brisc-hw/c"]
+64-bit = [ "brisc-hw/64-bit" ]
+m = [ "brisc-hw/m" ]
+a = [ "brisc-hw/a" ]
+c = [ "brisc-hw/c" ]
 
 [[bench]]
 harness = false
