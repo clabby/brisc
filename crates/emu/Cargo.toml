@@ -29,6 +29,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 rstest.workspace = true
 criterion.workspace = true
+const-hex = { version = "1.15.0", features = ["hex"] }
 
 [features]
 default = [ "64-bit", "a", "c", "m" ]
