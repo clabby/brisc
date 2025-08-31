@@ -26,6 +26,7 @@ rstest.workspace = true
 
 [features]
 default = [ "64-bit", "a", "c", "m" ]
+async-kernel = []
 
 # Architecture features
 64-bit = [ "brisc-isa/64-bit" ]

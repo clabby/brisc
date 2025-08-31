@@ -14,7 +14,7 @@ pub use builder::StEmuBuilder;
 
 /// Single-cycle RISC-V processor emulator.
 #[derive(Debug, Default)]
-pub struct StEmu<Config>
+pub struct StEmu<'ctx, Config>
 where
     Config: EmuConfig,
 {
@@ -23,19 +23,22 @@ where
     /// The device memory.
     pub memory: Config::Memory,
     /// The system call interface.
-    pub kernel: Config::Kernel,
+    pub kernel: Config::Kernel<'ctx>,
+    /// The emulator's context.
+    pub state: Config::State<'ctx>,
 }
 
-impl<Config> StEmu<Config>
+impl<'ctx, Config> StEmu<'ctx, Config>
 where
     Config: EmuConfig,
 {
     /// Creates a new [`StEmuBuilder`].
-    pub fn builder() -> StEmuBuilder<Config> {
+    pub fn builder() -> StEmuBuilder<'ctx, Config> {
         StEmuBuilder::default()
     }
 
     /// Executes the program until it exits, returning the final [PipelineRegister].
+    #[cfg(not(feature = "async-kernel"))]
     pub fn run(&mut self) -> PipelineResult<PipelineRegister> {
         while !self.register.exit {
             self.cycle()?;
@@ -46,6 +49,7 @@ where
 
     /// Execute a single cycle of the processor in full.
     #[inline(always)]
+    #[cfg(not(feature = "async-kernel"))]
     pub fn cycle(&mut self) -> PipelineResult<()> {
         let r = &mut self.register;
 
@@ -60,7 +64,48 @@ where
         match cycle_res {
             Ok(()) => {}
             Err(PipelineError::SyscallException(syscall_no)) => {
-                self.kernel.syscall(syscall_no, &mut self.memory, r)?;
+                self.kernel.syscall(syscall_no, &mut self.memory, r, &mut self.state)?;
+
+                // Exit emulation if the syscall terminated the program.
+                if r.exit {
+                    return Ok(());
+                }
+            }
+            Err(e) => return Err(e),
+        }
+
+        r.advance();
+        Ok(())
+    }
+
+    /// Executes the program until it exits, returning the final [PipelineRegister].
+    #[cfg(feature = "async-kernel")]
+    pub async fn run(&mut self) -> PipelineResult<PipelineRegister> {
+        while !self.register.exit {
+            self.cycle().await?;
+        }
+
+        Ok(self.register)
+    }
+
+    /// Execute a single cycle of the processor in full.
+    #[inline(always)]
+    #[cfg(feature = "async-kernel")]
+    pub async fn cycle(&mut self) -> PipelineResult<()> {
+        let r = &mut self.register;
+
+        // Execute all pipeline stages sequentially.
+        let cycle_res = instruction_fetch(r, &self.memory)
+            .and_then(|_| decode_instruction(r))
+            .and_then(|_| execute(r))
+            .and_then(|_| mem_access(r, &mut self.memory))
+            .and_then(|_| writeback(r));
+
+        // Handle system calls.
+        match cycle_res {
+            Ok(()) => {}
+            Err(PipelineError::SyscallException(syscall_no)) => {
+                self.kernel.syscall(syscall_no, &mut self.memory, r, &mut self.state).await?;
 
                 // Exit emulation if the syscall terminated the program.
                 if r.exit {

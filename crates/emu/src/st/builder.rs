@@ -7,7 +7,7 @@ use brisc_hw::{pipeline::PipelineRegister, XWord};
 
 /// A builder for the [`StEmu`] emulator.
 #[derive(Debug)]
-pub struct StEmuBuilder<Config>
+pub struct StEmuBuilder<'ctx, Config>
 where
     Config: EmuConfig,
 {
@@ -16,19 +16,21 @@ where
     /// The initial memory for the emulator.
     pub memory: Option<Config::Memory>,
     /// The system call interface for the emulator.
-    pub kernel: Option<Config::Kernel>,
+    pub kernel: Option<Config::Kernel<'ctx>>,
+    /// The emulator's state.
+    pub state: Option<Config::State<'ctx>>,
 }
 
-impl<Config> Default for StEmuBuilder<Config>
+impl<'ctx, Config> Default for StEmuBuilder<'ctx, Config>
 where
     Config: EmuConfig,
 {
     fn default() -> Self {
-        Self { pc: 0, memory: None, kernel: None }
+        Self { pc: 0, memory: None, kernel: None, state: None }
     }
 }
 
-impl<Config> StEmuBuilder<Config>
+impl<'ctx, Config> StEmuBuilder<'ctx, Config>
 where
     Config: EmuConfig,
     Config::Memory: Default,
@@ -42,7 +44,7 @@ where
     }
 }
 
-impl<Config> StEmuBuilder<Config>
+impl<'ctx, Config> StEmuBuilder<'ctx, Config>
 where
     Config: EmuConfig,
 {
@@ -59,8 +61,14 @@ where
     }
 
     /// Assigns the kernel to the emulator.
-    pub fn with_kernel(mut self, kernel: Config::Kernel) -> Self {
+    pub fn with_kernel(mut self, kernel: Config::Kernel<'ctx>) -> Self {
         self.kernel = Some(kernel);
+        self
+    }
+
+    /// Assigns the state to the emulator.
+    pub fn with_state(mut self, state: Config::State<'ctx>) -> Self {
+        self.state = Some(state);
         self
     }
 
@@ -69,11 +77,12 @@ where
     /// ## Panics
     ///
     /// Panics if the memory or kernel is not set.
-    pub fn build(self) -> StEmu<Config> {
+    pub fn build(self) -> StEmu<'ctx, Config> {
         StEmu {
             register: PipelineRegister::new(self.pc),
             memory: self.memory.expect("Memory not instantiated"),
             kernel: self.kernel.expect("Kernel not instantiated"),
+            state: self.state.expect("State not instantiated"),
         }
     }
 }

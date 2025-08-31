@@ -8,5 +8,8 @@ pub trait EmuConfig {
     type Memory: Memory;
 
     /// The kernel used by the emulator.
-    type Kernel: Kernel;
+    type Kernel<'a>: Kernel<Self::State<'a>>;
+
+    /// The external state passed to the kernel.
+    type State<'a>;
 }

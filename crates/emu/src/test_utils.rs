@@ -48,6 +48,7 @@ pub fn run_riscv_test(test_path: &PathBuf) -> f64 {
     let elf_bytes = fs::read(test_path).unwrap();
     let mut hart = StEmu::<TestStEmuConfig>::builder()
         .with_kernel(RiscvTestKernel)
+        .with_state(())
         .with_elf(&elf_bytes)
         .unwrap()
         .build();
@@ -81,18 +82,21 @@ struct TestStEmuConfig;
 impl EmuConfig for TestStEmuConfig {
     type Memory = SimpleMemory;
 
-    type Kernel = RiscvTestKernel;
+    type Kernel<'ctx> = RiscvTestKernel;
+
+    type State<'ctx> = ();
 }
 
 #[derive(Default)]
 struct RiscvTestKernel;
 
-impl Kernel for RiscvTestKernel {
+impl Kernel<()> for RiscvTestKernel {
     fn syscall<M: Memory>(
         &mut self,
         sysno: XWord,
         mem: &mut M,
         p_reg: &mut PipelineRegister,
+        _: &mut (),
     ) -> PipelineResult<XWord> {
         match sysno {
             0x5D => {

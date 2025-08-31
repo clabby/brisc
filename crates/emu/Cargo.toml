@@ -33,6 +33,7 @@ const-hex = { version = "1.15.0", features = ["hex"] }
 
 [features]
 default = [ "64-bit", "a", "c", "m" ]
+async-kernel = [ "brisc-hw/async-kernel" ]
 test-utils = [ "dep:rstest", "dep:tracing", "dep:tracing-subscriber" ]
 
 # Architecture features
