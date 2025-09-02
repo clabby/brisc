@@ -2,7 +2,6 @@
 
 use crate::{cfg::EmuConfig, st::StEmu};
 use brisc_hw::{
-    errors::PipelineResult,
     kernel::Kernel,
     memory::{Memory, SimpleMemory},
     pipeline::PipelineRegister,
@@ -87,17 +86,19 @@ impl EmuConfig<'_> for TestStEmuConfig {
     type Context = ();
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct RiscvTestKernel;
 
 impl Kernel<()> for RiscvTestKernel {
+    type Error = ();
+
     fn syscall<M: Memory>(
         &mut self,
         sysno: XWord,
         mem: &mut M,
         p_reg: &mut PipelineRegister,
         _: &mut (),
-    ) -> PipelineResult<XWord> {
+    ) -> Result<XWord, Self::Error> {
         match sysno {
             0x5D => {
                 let exit_code = p_reg.registers[REG_A0 as usize];

@@ -2,15 +2,34 @@
 
 use crate::cfg::EmuConfig;
 use brisc_hw::{
-    errors::{PipelineError, PipelineResult},
+    errors::PipelineError,
     kernel::Kernel,
     pipeline::{
         decode_instruction, execute, instruction_fetch, mem_access, writeback, PipelineRegister,
     },
 };
+use thiserror::Error;
 
 mod builder;
 pub use builder::StEmuBuilder;
+
+/// An error that can occur during emulation.
+#[derive(Error, Debug)]
+pub enum EmulationError<S, K: Kernel<S>> {
+    /// An error that occurred in the pipeline.
+    #[error(transparent)]
+    Pipeline(#[from] PipelineError),
+
+    /// An error that occurred in the kernel.
+    #[error(transparent)]
+    Kernel(K::Error),
+}
+
+/// A [`Result`] type aslias for emulation results.
+pub type EmulationResult<'a, T, Config> = Result<
+    T,
+    EmulationError<<Config as EmuConfig<'a>>::Context, <Config as EmuConfig<'a>>::Kernel>,
+>;
 
 /// Single-cycle RISC-V processor emulator.
 #[derive(Debug, Default)]
@@ -39,7 +58,7 @@ where
 
     /// Executes the program until it exits, returning the final [PipelineRegister].
     #[cfg(not(feature = "async-kernel"))]
-    pub fn run(&mut self) -> PipelineResult<PipelineRegister> {
+    pub fn run(&mut self) -> EmulationResult<'ctx, PipelineRegister, Config> {
         while !self.register.exit {
             self.cycle()?;
         }
@@ -50,7 +69,7 @@ where
     /// Execute a single cycle of the processor in full.
     #[inline(always)]
     #[cfg(not(feature = "async-kernel"))]
-    pub fn cycle(&mut self) -> PipelineResult<()> {
+    pub fn cycle(&mut self) -> EmulationResult<'ctx, (), Config> {
         let r = &mut self.register;
 
         // Execute all pipeline stages sequentially.
@@ -64,14 +83,16 @@ where
         match cycle_res {
             Ok(()) => {}
             Err(PipelineError::SyscallException(syscall_no)) => {
-                self.kernel.syscall(syscall_no, &mut self.memory, r, &mut self.ctx)?;
+                self.kernel
+                    .syscall(syscall_no, &mut self.memory, r, &mut self.ctx)
+                    .map_err(EmulationError::Kernel)?;
 
                 // Exit emulation if the syscall terminated the program.
                 if r.exit {
                     return Ok(());
                 }
             }
-            Err(e) => return Err(e),
+            Err(e) => return Err(e.into()),
         }
 
         r.advance();
@@ -80,7 +101,7 @@ where
 
     /// Executes the program until it exits, returning the final [PipelineRegister].
     #[cfg(feature = "async-kernel")]
-    pub async fn run(&mut self) -> PipelineResult<PipelineRegister> {
+    pub async fn run(&mut self) -> EmulationResult<'ctx, PipelineRegister, Config> {
         while !self.register.exit {
             self.cycle().await?;
         }
@@ -91,7 +112,7 @@ where
     /// Execute a single cycle of the processor in full.
     #[inline(always)]
     #[cfg(feature = "async-kernel")]
-    pub async fn cycle(&mut self) -> PipelineResult<()> {
+    pub async fn cycle(&mut self) -> EmulationResult<'ctx, (), Config> {
         let r = &mut self.register;
 
         // Execute all pipeline stages sequentially.
@@ -105,18 +126,26 @@ where
         match cycle_res {
             Ok(()) => {}
             Err(PipelineError::SyscallException(syscall_no)) => {
-                self.kernel.syscall(syscall_no, &mut self.memory, r, &mut self.ctx).await?;
+                self.kernel
+                    .syscall(syscall_no, &mut self.memory, r, &mut self.ctx)
+                    .await
+                    .map_err(EmulationError::Kernel)?;
 
                 // Exit emulation if the syscall terminated the program.
                 if r.exit {
                     return Ok(());
                 }
             }
-            Err(e) => return Err(e),
+            Err(e) => return Err(e.into()),
         }
 
         r.advance();
         Ok(())
+    }
+
+    /// Destroys the emulator and returns the context.
+    pub fn take_ctx(self) -> Config::Context {
+        self.ctx
     }
 }
 

@@ -50,6 +50,7 @@ dependencies = [
  "criterion",
  "elf",
  "rstest",
+ "thiserror",
  "tracing",
  "tracing-subscriber",
 ]

@@ -1,10 +1,13 @@
 //! Linux kernel interface.
 
-use crate::{errors::PipelineResult, memory::Memory, pipeline::PipelineRegister};
+use crate::{memory::Memory, pipeline::PipelineRegister};
 use brisc_isa::XWord;
 
 /// The [`Kernel`] trait defines the interface for performing system calls.
 pub trait Kernel<S> {
+    /// The error type returned by the kernel.
+    type Error;
+
     /// Perform a system call with the given arguments.
     #[cfg(not(feature = "async-kernel"))]
     fn syscall<M: Memory>(
@@ -13,7 +16,7 @@ pub trait Kernel<S> {
         memory: &mut M,
         p_reg: &mut PipelineRegister,
         state: &mut S,
-    ) -> PipelineResult<XWord>;
+    ) -> Result<XWord, Self::Error>;
 
     /// Perform a system call with the given arguments.
     #[cfg(feature = "async-kernel")]
@@ -23,10 +26,12 @@ pub trait Kernel<S> {
         memory: &mut M,
         p_reg: &mut PipelineRegister,
         state: &mut S,
-    ) -> impl core::future::Future<Output = PipelineResult<XWord>>;
+    ) -> impl core::future::Future<Output = Result<XWord, Self::Error>>;
 }
 
 impl<S> Kernel<S> for () {
+    type Error = ();
+
     #[cfg(not(feature = "async-kernel"))]
     fn syscall<M: Memory>(
         &mut self,
@@ -34,7 +39,7 @@ impl<S> Kernel<S> for () {
         _: &mut M,
         _: &mut PipelineRegister,
         _: &mut S,
-    ) -> PipelineResult<XWord> {
+    ) -> Result<XWord, Self::Error> {
         unimplemented!()
     }
 
@@ -45,7 +50,7 @@ impl<S> Kernel<S> for () {
         _: &mut M,
         _: &mut PipelineRegister,
         _: &mut S,
-    ) -> PipelineResult<XWord> {
+    ) -> Result<XWord, Self::Error> {
         unimplemented!()
     }
 }
