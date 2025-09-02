@@ -16,21 +16,21 @@ pub use builder::StEmuBuilder;
 #[derive(Debug, Default)]
 pub struct StEmu<'ctx, Config>
 where
-    Config: EmuConfig,
+    Config: EmuConfig<'ctx>,
 {
     /// The pipeline register.
     pub register: PipelineRegister,
     /// The device memory.
     pub memory: Config::Memory,
     /// The system call interface.
-    pub kernel: Config::Kernel<'ctx>,
+    pub kernel: Config::Kernel,
     /// The emulator's context.
-    pub state: Config::State<'ctx>,
+    pub ctx: Config::Context,
 }
 
 impl<'ctx, Config> StEmu<'ctx, Config>
 where
-    Config: EmuConfig,
+    Config: EmuConfig<'ctx>,
 {
     /// Creates a new [`StEmuBuilder`].
     pub fn builder() -> StEmuBuilder<'ctx, Config> {
@@ -64,7 +64,7 @@ where
         match cycle_res {
             Ok(()) => {}
             Err(PipelineError::SyscallException(syscall_no)) => {
-                self.kernel.syscall(syscall_no, &mut self.memory, r, &mut self.state)?;
+                self.kernel.syscall(syscall_no, &mut self.memory, r, &mut self.ctx)?;
 
                 // Exit emulation if the syscall terminated the program.
                 if r.exit {
@@ -105,7 +105,7 @@ where
         match cycle_res {
             Ok(()) => {}
             Err(PipelineError::SyscallException(syscall_no)) => {
-                self.kernel.syscall(syscall_no, &mut self.memory, r, &mut self.state).await?;
+                self.kernel.syscall(syscall_no, &mut self.memory, r, &mut self.ctx).await?;
 
                 // Exit emulation if the syscall terminated the program.
                 if r.exit {

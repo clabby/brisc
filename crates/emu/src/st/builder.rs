@@ -9,21 +9,21 @@ use brisc_hw::{pipeline::PipelineRegister, XWord};
 #[derive(Debug)]
 pub struct StEmuBuilder<'ctx, Config>
 where
-    Config: EmuConfig,
+    Config: EmuConfig<'ctx>,
 {
     /// The starting program counter.
     pub pc: XWord,
     /// The initial memory for the emulator.
     pub memory: Option<Config::Memory>,
     /// The system call interface for the emulator.
-    pub kernel: Option<Config::Kernel<'ctx>>,
+    pub kernel: Option<Config::Kernel>,
     /// The emulator's state.
-    pub state: Option<Config::State<'ctx>>,
+    pub state: Option<Config::Context>,
 }
 
 impl<'ctx, Config> Default for StEmuBuilder<'ctx, Config>
 where
-    Config: EmuConfig,
+    Config: EmuConfig<'ctx>,
 {
     fn default() -> Self {
         Self { pc: 0, memory: None, kernel: None, state: None }
@@ -32,7 +32,7 @@ where
 
 impl<'ctx, Config> StEmuBuilder<'ctx, Config>
 where
-    Config: EmuConfig,
+    Config: EmuConfig<'ctx>,
     Config::Memory: Default,
 {
     /// Loads an elf file into the emulator builder, initializing the program counter and memory.
@@ -46,7 +46,7 @@ where
 
 impl<'ctx, Config> StEmuBuilder<'ctx, Config>
 where
-    Config: EmuConfig,
+    Config: EmuConfig<'ctx>,
 {
     /// Assigns the entry point of the program.
     pub const fn with_pc(mut self, pc: XWord) -> Self {
@@ -61,13 +61,13 @@ where
     }
 
     /// Assigns the kernel to the emulator.
-    pub fn with_kernel(mut self, kernel: Config::Kernel<'ctx>) -> Self {
+    pub fn with_kernel(mut self, kernel: Config::Kernel) -> Self {
         self.kernel = Some(kernel);
         self
     }
 
     /// Assigns the state to the emulator.
-    pub fn with_state(mut self, state: Config::State<'ctx>) -> Self {
+    pub fn with_ctx(mut self, state: Config::Context) -> Self {
         self.state = Some(state);
         self
     }
@@ -82,7 +82,7 @@ where
             register: PipelineRegister::new(self.pc),
             memory: self.memory.expect("Memory not instantiated"),
             kernel: self.kernel.expect("Kernel not instantiated"),
-            state: self.state.expect("State not instantiated"),
+            ctx: self.state.expect("State not instantiated"),
         }
     }
 }

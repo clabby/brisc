@@ -48,7 +48,7 @@ pub fn run_riscv_test(test_path: &PathBuf) -> f64 {
     let elf_bytes = fs::read(test_path).unwrap();
     let mut hart = StEmu::<TestStEmuConfig>::builder()
         .with_kernel(RiscvTestKernel)
-        .with_state(())
+        .with_ctx(())
         .with_elf(&elf_bytes)
         .unwrap()
         .build();
@@ -79,12 +79,12 @@ pub fn run_riscv_test(test_path: &PathBuf) -> f64 {
 #[derive(Default)]
 struct TestStEmuConfig;
 
-impl EmuConfig for TestStEmuConfig {
+impl EmuConfig<'_> for TestStEmuConfig {
     type Memory = SimpleMemory;
 
-    type Kernel<'ctx> = RiscvTestKernel;
+    type Kernel = RiscvTestKernel;
 
-    type State<'ctx> = ();
+    type Context = ();
 }
 
 #[derive(Default)]
