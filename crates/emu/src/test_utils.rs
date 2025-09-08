@@ -101,14 +101,14 @@ impl Kernel<()> for RiscvTestKernel {
     ) -> Result<XWord, Self::Error> {
         match sysno {
             0x5D => {
-                let exit_code = p_reg.registers[REG_A0 as usize];
+                let exit_code = p_reg.registers[REG_A0];
                 p_reg.exit_code = exit_code;
                 p_reg.exit = true;
             }
             0x40 => {
-                let fd = p_reg.registers[REG_A0 as usize];
-                let ptr = p_reg.registers[REG_A1 as usize];
-                let len = p_reg.registers[REG_A2 as usize];
+                let fd = p_reg.registers[REG_A0];
+                let ptr = p_reg.registers[REG_A1];
+                let len = p_reg.registers[REG_A2];
 
                 let raw_msg = mem.read_memory_range(ptr, len).unwrap();
                 let msg = String::from_utf8_lossy(&raw_msg);

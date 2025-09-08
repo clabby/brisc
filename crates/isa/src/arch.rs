@@ -73,97 +73,97 @@ cfg_if! {
 }
 
 /// hardwired zero
-pub const REG_ZERO: XWord = 0;
+pub const REG_ZERO: usize = 0;
 
 /// return address
-pub const REG_RA: XWord = 1;
+pub const REG_RA: usize = 1;
 
 /// stack pointer
-pub const REG_SP: XWord = 2;
+pub const REG_SP: usize = 2;
 
 /// global pointer
-pub const REG_GP: XWord = 3;
+pub const REG_GP: usize = 3;
 
 /// thread pointer
-pub const REG_TP: XWord = 4;
+pub const REG_TP: usize = 4;
 
 /// temporary register 0
-pub const REG_T0: XWord = 5;
+pub const REG_T0: usize = 5;
 
 /// temporary register 1
-pub const REG_T1: XWord = 6;
+pub const REG_T1: usize = 6;
 
 /// temporary register 2
-pub const REG_T2: XWord = 7;
+pub const REG_T2: usize = 7;
 
 /// saved register / frame pointer
-pub const REG_S0_FP: XWord = 8;
+pub const REG_S0_FP: usize = 8;
 
 /// saved register 1
-pub const REG_S1: XWord = 9;
+pub const REG_S1: usize = 9;
 
 /// function argument 0 / return value 0
-pub const REG_A0: XWord = 10;
+pub const REG_A0: usize = 10;
 
 /// function argument 1 / return value 1
-pub const REG_A1: XWord = 11;
+pub const REG_A1: usize = 11;
 
 /// function argument 2
-pub const REG_A2: XWord = 12;
+pub const REG_A2: usize = 12;
 
 /// function argument 3
-pub const REG_A3: XWord = 13;
+pub const REG_A3: usize = 13;
 
 /// function argument 4
-pub const REG_A4: XWord = 14;
+pub const REG_A4: usize = 14;
 
 /// function argument 5
-pub const REG_A5: XWord = 15;
+pub const REG_A5: usize = 15;
 
 /// function argument 6
-pub const REG_A6: XWord = 16;
+pub const REG_A6: usize = 16;
 
 /// function argument 7
-pub const REG_A7: XWord = 17;
+pub const REG_A7: usize = 17;
 
 /// saved register 2
-pub const REG_S2: XWord = 18;
+pub const REG_S2: usize = 18;
 
 /// saved register 3
-pub const REG_S3: XWord = 19;
+pub const REG_S3: usize = 19;
 
 /// saved register 4
-pub const REG_S4: XWord = 20;
+pub const REG_S4: usize = 20;
 
 /// saved register 5
-pub const REG_S5: XWord = 21;
+pub const REG_S5: usize = 21;
 
 /// saved register 6
-pub const REG_S6: XWord = 22;
+pub const REG_S6: usize = 22;
 
 /// saved register 7
-pub const REG_S7: XWord = 23;
+pub const REG_S7: usize = 23;
 
 /// saved register 8
-pub const REG_S8: XWord = 24;
+pub const REG_S8: usize = 24;
 
 /// saved register 9
-pub const REG_S9: XWord = 25;
+pub const REG_S9: usize = 25;
 
 /// saved register 10
-pub const REG_S10: XWord = 26;
+pub const REG_S10: usize = 26;
 
 /// saved register 11
-pub const REG_S11: XWord = 27;
+pub const REG_S11: usize = 27;
 
 /// temporary register 3
-pub const REG_T3: XWord = 28;
+pub const REG_T3: usize = 28;
 
 /// temporary register 4
-pub const REG_T4: XWord = 29;
+pub const REG_T4: usize = 29;
 
 /// temporary register 5
-pub const REG_T5: XWord = 30;
+pub const REG_T5: usize = 30;
 
 /// temporary register 6
-pub const REG_T6: XWord = 31;
+pub const REG_T6: usize = 31;

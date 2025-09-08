@@ -25,7 +25,7 @@ pub fn decode_instruction(register: &mut PipelineRegister) -> PipelineResult<()>
 
     // Throw an interrupt if the instruction is a system call.
     if instruction.is_system_call() {
-        return Err(PipelineError::SyscallException(register.registers[REG_A7 as usize]));
+        return Err(PipelineError::SyscallException(register.registers[REG_A7]));
     }
 
     Ok(())
