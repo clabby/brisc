@@ -31,16 +31,16 @@ pub fn execute(p_reg: &mut PipelineRegister) -> PipelineResult<()> {
         }
         Instruction::RegisterArithmetic(_, funct) => execute_reg_arithmetic(p_reg, funct)?,
         Instruction::Lui(u_type) => u_type.imm,
-        Instruction::Auipc(u_type) => p_reg.pc + u_type.imm,
+        Instruction::Auipc(u_type) => p_reg.pc.wrapping_add(u_type.imm),
         Instruction::Jal(j_type) => {
             let result = p_reg.next_pc;
-            p_reg.next_pc = p_reg.pc + j_type.imm;
+            p_reg.next_pc = p_reg.pc.wrapping_add(j_type.imm);
             result
         }
         Instruction::Jalr(i_type) => {
             let result = p_reg.next_pc;
             let rs1 = p_reg.rs1_value.ok_or(PipelineError::MissingState("rs1_value"))?;
-            p_reg.next_pc = (rs1 + i_type.imm) & !1;
+            p_reg.next_pc = (rs1.wrapping_add(i_type.imm)) & !1;
             result
         }
         Instruction::Fence => {
@@ -87,7 +87,7 @@ fn execute_branch(
 ) -> PipelineResult<XWord> {
     let rs1 = p_reg.rs1_value.ok_or(PipelineError::MissingState("rs1_value"))?;
     let rs2 = p_reg.rs2_value.ok_or(PipelineError::MissingState("rs2_value"))?;
-    let target = p_reg.pc + b_type.imm;
+    let target = p_reg.pc.wrapping_add(b_type.imm);
 
     match funct {
         BranchFunction::Beq => {
@@ -258,7 +258,7 @@ fn execute_imm_arithmetic_word(
     let rs1 = p_reg.rs1_value.ok_or(PipelineError::MissingState("rs1_value"))? as Word;
 
     let result = match funct {
-        ImmediateArithmeticWordFunction::Addiw => (i_type.imm as Word) + rs1,
+        ImmediateArithmeticWordFunction::Addiw => (i_type.imm as Word).wrapping_add(rs1),
         ImmediateArithmeticWordFunction::Slliw => rs1 << (i_type.imm & 0x1F),
         ImmediateArithmeticWordFunction::Srliw => rs1 >> (i_type.imm & 0x1F),
         ImmediateArithmeticWordFunction::Sraiw => ((rs1 as i32) >> (i_type.imm & 0x1F)) as Word,
