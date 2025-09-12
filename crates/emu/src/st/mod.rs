@@ -3,7 +3,7 @@
 use crate::cfg::EmuConfig;
 use brisc_hw::{
     errors::PipelineError,
-    kernel::Kernel,
+    kernel::{AsyncKernel, Kernel},
     pipeline::{
         decode_instruction, execute, instruction_fetch, mem_access, writeback, PipelineRegister,
     },
@@ -15,21 +15,18 @@ pub use builder::StEmuBuilder;
 
 /// An error that can occur during emulation.
 #[derive(Error, Debug)]
-pub enum EmulationError<S, K: Kernel<S>> {
+pub enum EmulationError<E> {
     /// An error that occurred in the pipeline.
     #[error(transparent)]
     Pipeline(#[from] PipelineError),
 
     /// An error that occurred in the kernel.
     #[error(transparent)]
-    Kernel(K::Error),
+    Kernel(E),
 }
 
 /// A [`Result`] type aslias for emulation results.
-pub type EmulationResult<'a, T, Config> = Result<
-    T,
-    EmulationError<<Config as EmuConfig<'a>>::Context, <Config as EmuConfig<'a>>::Kernel>,
->;
+pub type EmulationResult<T, KernelError> = Result<T, EmulationError<KernelError>>;
 
 /// Single-cycle RISC-V processor emulator.
 #[derive(Debug, Default)]
@@ -56,9 +53,21 @@ where
         StEmuBuilder::default()
     }
 
+    /// Destroys the emulator and returns the context.
+    pub fn take_ctx(self) -> Config::Context {
+        self.ctx
+    }
+}
+
+impl<'ctx, Config> StEmu<'ctx, Config>
+where
+    Config: EmuConfig<'ctx>,
+    Config::Kernel: Kernel<Config::Context> + 'ctx,
+{
     /// Executes the program until it exits, returning the final [PipelineRegister].
-    #[cfg(not(feature = "async-kernel"))]
-    pub fn run(&mut self) -> EmulationResult<'ctx, PipelineRegister, Config> {
+    pub fn run(
+        &mut self,
+    ) -> EmulationResult<PipelineRegister, <Config::Kernel as Kernel<Config::Context>>::Error> {
         while !self.register.exit {
             self.cycle()?;
         }
@@ -68,8 +77,9 @@ where
 
     /// Execute a single cycle of the processor in full.
     #[inline(always)]
-    #[cfg(not(feature = "async-kernel"))]
-    pub fn cycle(&mut self) -> EmulationResult<'ctx, (), Config> {
+    pub fn cycle(
+        &mut self,
+    ) -> EmulationResult<(), <Config::Kernel as Kernel<Config::Context>>::Error> {
         let r = &mut self.register;
 
         // Execute all pipeline stages sequentially.
@@ -98,12 +108,20 @@ where
         r.advance();
         Ok(())
     }
+}
 
+impl<'ctx, Config> StEmu<'ctx, Config>
+where
+    Config: EmuConfig<'ctx>,
+    Config::Kernel: AsyncKernel<Config::Context> + 'ctx,
+{
     /// Executes the program until it exits, returning the final [PipelineRegister].
-    #[cfg(feature = "async-kernel")]
-    pub async fn run(&mut self) -> EmulationResult<'ctx, PipelineRegister, Config> {
+    pub async fn run_async(
+        &mut self,
+    ) -> EmulationResult<PipelineRegister, <Config::Kernel as AsyncKernel<Config::Context>>::Error>
+    {
         while !self.register.exit {
-            self.cycle().await?;
+            self.cycle_async().await?;
         }
 
         Ok(self.register)
@@ -111,8 +129,9 @@ where
 
     /// Execute a single cycle of the processor in full.
     #[inline(always)]
-    #[cfg(feature = "async-kernel")]
-    pub async fn cycle(&mut self) -> EmulationResult<'ctx, (), Config> {
+    pub async fn cycle_async(
+        &mut self,
+    ) -> EmulationResult<(), <Config::Kernel as AsyncKernel<Config::Context>>::Error> {
         let r = &mut self.register;
 
         // Execute all pipeline stages sequentially.
@@ -141,11 +160,6 @@ where
 
         r.advance();
         Ok(())
-    }
-
-    /// Destroys the emulator and returns the context.
-    pub fn take_ctx(self) -> Config::Context {
-        self.ctx
     }
 }
 

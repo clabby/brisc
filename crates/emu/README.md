@@ -59,12 +59,15 @@ const HELLO_WORLD_ELF: &str = "7f454c460201010000000000000000000200f30001000000e
 struct ExampleKernel;
 
 impl Kernel for ExampleKernel {
+    type Error = ();
+
     fn syscall<M: Memory>(
         &mut self,
         sysno: XWord,
         mem: &mut M,
         p_reg: &mut PipelineRegister,
-    ) -> PipelineResult<XWord> {
+        _context: &mut ()
+    ) -> Result<XWord, Self::Error> {
         match sysno {
             0x5D => {
                 let exit_code = p_reg.registers[REG_A0 as usize];
@@ -95,14 +98,16 @@ impl Kernel for ExampleKernel {
 #[derive(Default)]
 struct ExampleEmuConfig;
 
-impl EmuConfig for ExampleEmuConfig {
+impl EmuConfig<'_> for ExampleEmuConfig {
     type Memory = SimpleMemory;
     type Kernel = ExampleKernel;
+    type Context = ();
 }
 
 let elf = const_hex::decode(HELLO_WORLD_ELF).unwrap();
 let mut emu = StEmu::<ExampleEmuConfig>::builder()
     .with_kernel(ExampleKernel)
+    .with_ctx(())
     .with_elf(&elf)
     .unwrap()
     .build();

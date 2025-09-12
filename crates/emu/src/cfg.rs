@@ -1,6 +1,6 @@
 //! Emulator type configuration trait
 
-use brisc_hw::{kernel::Kernel, memory::Memory};
+use brisc_hw::memory::Memory;
 
 /// The [`EmuConfig`] trait defines the type configuration for the emulator.
 pub trait EmuConfig<'ctx> {
@@ -8,7 +8,7 @@ pub trait EmuConfig<'ctx> {
     type Memory: Memory;
 
     /// The kernel used by the emulator.
-    type Kernel: Kernel<Self::Context> + 'ctx;
+    type Kernel;
 
     /// The external state passed to the kernel.
     type Context: 'ctx;

@@ -17,8 +17,8 @@ where
     pub memory: Option<Config::Memory>,
     /// The system call interface for the emulator.
     pub kernel: Option<Config::Kernel>,
-    /// The emulator's state.
-    pub state: Option<Config::Context>,
+    /// The emulator's external context.
+    pub ctx: Option<Config::Context>,
 }
 
 impl<'ctx, Config> Default for StEmuBuilder<'ctx, Config>
@@ -26,7 +26,7 @@ where
     Config: EmuConfig<'ctx>,
 {
     fn default() -> Self {
-        Self { pc: 0, memory: None, kernel: None, state: None }
+        Self { pc: 0, memory: None, kernel: None, ctx: None }
     }
 }
 
@@ -66,9 +66,9 @@ where
         self
     }
 
-    /// Assigns the state to the emulator.
-    pub fn with_ctx(mut self, state: Config::Context) -> Self {
-        self.state = Some(state);
+    /// Assigns the context to the emulator.
+    pub fn with_ctx(mut self, ctx: Config::Context) -> Self {
+        self.ctx = Some(ctx);
         self
     }
 
@@ -82,7 +82,7 @@ where
             register: PipelineRegister::new(self.pc),
             memory: self.memory.expect("Memory not instantiated"),
             kernel: self.kernel.expect("Kernel not instantiated"),
-            ctx: self.state.expect("State not instantiated"),
+            ctx: self.ctx.expect("Context not instantiated"),
         }
     }
 }
