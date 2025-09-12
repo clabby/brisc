@@ -2,7 +2,6 @@
 
 use crate::{cfg::EmuConfig, st::StEmu};
 use brisc_hw::{
-    errors::PipelineResult,
     kernel::Kernel,
     memory::{Memory, SimpleMemory},
     pipeline::PipelineRegister,
@@ -48,6 +47,7 @@ pub fn run_riscv_test(test_path: &PathBuf) -> f64 {
     let elf_bytes = fs::read(test_path).unwrap();
     let mut hart = StEmu::<TestStEmuConfig>::builder()
         .with_kernel(RiscvTestKernel)
+        .with_ctx(())
         .with_elf(&elf_bytes)
         .unwrap()
         .build();
@@ -78,32 +78,37 @@ pub fn run_riscv_test(test_path: &PathBuf) -> f64 {
 #[derive(Default)]
 struct TestStEmuConfig;
 
-impl EmuConfig for TestStEmuConfig {
+impl EmuConfig<'_> for TestStEmuConfig {
     type Memory = SimpleMemory;
 
     type Kernel = RiscvTestKernel;
+
+    type Context = ();
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 struct RiscvTestKernel;
 
-impl Kernel for RiscvTestKernel {
+impl Kernel<()> for RiscvTestKernel {
+    type Error = ();
+
     fn syscall<M: Memory>(
         &mut self,
         sysno: XWord,
         mem: &mut M,
         p_reg: &mut PipelineRegister,
-    ) -> PipelineResult<XWord> {
+        _: &mut (),
+    ) -> Result<XWord, Self::Error> {
         match sysno {
             0x5D => {
-                let exit_code = p_reg.registers[REG_A0 as usize];
+                let exit_code = p_reg.registers[REG_A0];
                 p_reg.exit_code = exit_code;
                 p_reg.exit = true;
             }
             0x40 => {
-                let fd = p_reg.registers[REG_A0 as usize];
-                let ptr = p_reg.registers[REG_A1 as usize];
-                let len = p_reg.registers[REG_A2 as usize];
+                let fd = p_reg.registers[REG_A0];
+                let ptr = p_reg.registers[REG_A1];
+                let len = p_reg.registers[REG_A2];
 
                 let raw_msg = mem.read_memory_range(ptr, len).unwrap();
                 let msg = String::from_utf8_lossy(&raw_msg);

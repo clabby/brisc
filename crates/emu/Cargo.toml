@@ -17,6 +17,7 @@ workspace = true
 brisc-hw.workspace = true
 
 # External
+thiserror.workspace = true
 elf = { version = "0.8.0", default-features = false }
 
 # `test-utils` feature

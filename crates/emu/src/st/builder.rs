@@ -7,9 +7,9 @@ use brisc_hw::{pipeline::PipelineRegister, XWord};
 
 /// A builder for the [`StEmu`] emulator.
 #[derive(Debug)]
-pub struct StEmuBuilder<Config>
+pub struct StEmuBuilder<'ctx, Config>
 where
-    Config: EmuConfig,
+    Config: EmuConfig<'ctx>,
 {
     /// The starting program counter.
     pub pc: XWord,
@@ -17,20 +17,22 @@ where
     pub memory: Option<Config::Memory>,
     /// The system call interface for the emulator.
     pub kernel: Option<Config::Kernel>,
+    /// The emulator's external context.
+    pub ctx: Option<Config::Context>,
 }
 
-impl<Config> Default for StEmuBuilder<Config>
+impl<'ctx, Config> Default for StEmuBuilder<'ctx, Config>
 where
-    Config: EmuConfig,
+    Config: EmuConfig<'ctx>,
 {
     fn default() -> Self {
-        Self { pc: 0, memory: None, kernel: None }
+        Self { pc: 0, memory: None, kernel: None, ctx: None }
     }
 }
 
-impl<Config> StEmuBuilder<Config>
+impl<'ctx, Config> StEmuBuilder<'ctx, Config>
 where
-    Config: EmuConfig,
+    Config: EmuConfig<'ctx>,
     Config::Memory: Default,
 {
     /// Loads an elf file into the emulator builder, initializing the program counter and memory.
@@ -42,9 +44,9 @@ where
     }
 }
 
-impl<Config> StEmuBuilder<Config>
+impl<'ctx, Config> StEmuBuilder<'ctx, Config>
 where
-    Config: EmuConfig,
+    Config: EmuConfig<'ctx>,
 {
     /// Assigns the entry point of the program.
     pub const fn with_pc(mut self, pc: XWord) -> Self {
@@ -64,16 +66,23 @@ where
         self
     }
 
+    /// Assigns the context to the emulator.
+    pub fn with_ctx(mut self, ctx: Config::Context) -> Self {
+        self.ctx = Some(ctx);
+        self
+    }
+
     /// Builds the emulator with the current configuration.
     ///
     /// ## Panics
     ///
     /// Panics if the memory or kernel is not set.
-    pub fn build(self) -> StEmu<Config> {
+    pub fn build(self) -> StEmu<'ctx, Config> {
         StEmu {
             register: PipelineRegister::new(self.pc),
             memory: self.memory.expect("Memory not instantiated"),
             kernel: self.kernel.expect("Kernel not instantiated"),
+            ctx: self.ctx.expect("Context not instantiated"),
         }
     }
 }
