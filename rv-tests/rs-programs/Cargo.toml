@@ -24,3 +24,35 @@ path = "src/quicksort_heap.rs"
 [[bin]]
 name = "eth-transfer"
 path = "src/eth_transfer.rs"
+
+[[bin]]
+name = "sha256"
+path = "src/sha256.rs"
+
+[[bin]]
+name = "matmul"
+path = "src/matmul.rs"
+
+[[bin]]
+name = "sieve"
+path = "src/sieve.rs"
+
+[[bin]]
+name = "crc-rle"
+path = "src/crc_rle.rs"
+
+[[bin]]
+name = "bfvm"
+path = "src/bfvm.rs"
+
+[[bin]]
+name = "hashmap"
+path = "src/hashmap.rs"
+
+[[bin]]
+name = "mandelbrot"
+path = "src/mandelbrot.rs"
+
+[[bin]]
+name = "tree"
+path = "src/tree.rs"

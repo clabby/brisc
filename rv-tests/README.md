@@ -4,6 +4,29 @@ This directory contains test vectors for the `brisc` emulator, namely:
 - the [`riscv-tests`][rv-tests] submodule, containing test suites for each instruction supported by the emulator.
 - sample `no_std` Rust programs, for benchmarking.
 
+## Rust Programs
+
+The programs in `rs-programs` run as guests in the emulator tests and in the benchmarks. Their
+binaries, for 32 and 64 bits, are in `bin` as `rs-{32,64}bit-<name>`.
+
+- `fib`, `quicksort-heap` and `eth-transfer` use the `syscalls` and allocator crates.
+- `sha256`, `matmul`, `sieve`, `crc-rle`, `bfvm`, `hashmap`, `mandelbrot` and `tree` have
+  no dependencies and stand for different kinds of general-purpose code: hashing, dense arithmetic,
+  byte loops, table lookups, interpreter dispatch, random memory access, multiplication and
+  pointer chasing.
+
+The programs without dependencies compute a checksum. When one runs on RISC-V it exits with code
+zero if its checksum matches the one that the same source produces on the host, so each is also a
+test of the emulator against native execution. Running a program on the host prints its checksum,
+which is how the expected value in the source is obtained:
+
+```sh
+rustc --edition 2021 -O rs-programs/src/sha256.rs -o /tmp/sha256 && /tmp/sha256
+```
+
+Build a guest with `just build-rs-program-tests <name> <32|64>`, or with
+`cargo build --release --target riscv64imac-unknown-none-elf --bin <name>` in `rs-programs`.
+
 ## `riscv-tests` Test Suites
 
 For the sake of `brisc`, we only care about a few of the test suites that are available in the upstream spec tests:
