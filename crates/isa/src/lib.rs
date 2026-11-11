@@ -19,8 +19,5 @@ pub use opcode::{Format, Opcode};
 
 pub mod asm;
 
-#[doc(hidden)]
-pub mod legacy;
-
 mod arch;
 pub use arch::*;
