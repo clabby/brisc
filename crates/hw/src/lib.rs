@@ -8,10 +8,8 @@
 extern crate alloc;
 
 pub mod cpu;
-pub mod errors;
 pub mod kernel;
 pub mod memory;
-pub mod pipeline;
 
 // Re-export the ISA types.
 pub use brisc_isa::*;

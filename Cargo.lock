@@ -60,7 +60,6 @@ name = "brisc-hw"
 version = "0.0.1"
 dependencies = [
  "brisc-isa",
- "cfg-if",
  "hashbrown 0.15.5",
  "rstest",
  "thiserror",

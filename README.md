@@ -17,8 +17,8 @@ programs targeting the unprivileged `riscv{32/64}i{mac}` ISAs.
 ## Overview
 
 - [`brisc-isa`](./crates/isa) - Types for supported instructions and decoding utilities.
-- [`brisc-hw`](./crates/hw) - RISC-V Processor implementation (Pipeline stages, memory bus interface, register file, etc.)
-- [`brisc-emu`](./crates/emu) - Single-Threaded RISC-V hart emulator with a 5-stage pipeline.
+- [`brisc-hw`](./crates/hw) - RISC-V Processor implementation (interpreter, memory, register file, kernel interface)
+- [`brisc-emu`](./crates/emu) - Single-Threaded RISC-V hart emulator with an ELF loader and sync and async kernel support.
 
 ## Contributing
 

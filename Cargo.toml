@@ -10,7 +10,7 @@ license = "MIT"
 authors = ["clabby"]
 repository = "https://github.com/clabby/brisc"
 homepage = "https://github.com/clabby/brisc"
-keywords = ["risc-v", "emulator", "pipeline", "hardware", "isa"]
+keywords = ["risc-v", "emulator", "interpreter", "hardware", "isa"]
 categories = ["emulators", "risc-v"]
 
 [workspace.lints.rust]

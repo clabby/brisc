@@ -1,6 +1,6 @@
 [package]
 name = "brisc-hw"
-description = "Implementation of the hardware components of a 5-stage RISC-V i{mac} processor."
+description = "Implementation of the hardware components of a RISC-V i{mac} processor."
 version = "0.0.1"
 edition.workspace = true
 authors.workspace = true
@@ -19,7 +19,6 @@ brisc-isa.workspace = true
 # External
 thiserror.workspace = true
 hashbrown.workspace = true
-cfg-if.workspace = true
 
 [dev-dependencies]
 rstest.workspace = true
