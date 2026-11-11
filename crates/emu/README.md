@@ -19,12 +19,13 @@ following features:
 ```rust
 use brisc_emu::{
     cfg::EmuConfig,
-    kernel::{Kernel, Syscall},
+    kernel::{Kernel, Syscall, SyscallError},
     st::StEmu,
 };
 use brisc_hw::{
+    bus::Bus,
     cpu::Registers,
-    memory::{Memory, SparseMemory},
+    memory::SparseMemory,
     XWord, REG_A0, REG_A1, REG_A2,
 };
 
@@ -65,24 +66,24 @@ impl Kernel<String> for ExampleKernel {
     /// The number of the unsupported system call.
     type Error = XWord;
 
-    fn syscall<M: Memory>(
+    fn syscall<B: Bus>(
         &mut self,
         sysno: XWord,
-        mem: &mut M,
+        bus: &mut B,
         registers: &mut Registers,
         output: &mut String,
-    ) -> Result<Syscall, Self::Error> {
+    ) -> Result<Syscall, SyscallError<XWord, B::Error>> {
         match sysno {
             // exit
             0x5D => Ok(Syscall::Exit(registers.get(REG_A0))),
             // write
             0x40 => {
                 let mut msg = vec![0; registers.get(REG_A2) as usize];
-                mem.read(registers.get(REG_A1), &mut msg);
+                bus.read(registers.get(REG_A1), &mut msg)?;
                 output.push_str(&String::from_utf8_lossy(&msg));
                 Ok(Syscall::Continue)
             }
-            _ => Err(sysno),
+            _ => Err(SyscallError::Kernel(sysno)),
         }
     }
 }
@@ -90,7 +91,7 @@ impl Kernel<String> for ExampleKernel {
 struct ExampleEmuConfig;
 
 impl EmuConfig<'_> for ExampleEmuConfig {
-    type Memory = SparseMemory;
+    type Bus = SparseMemory;
     type Kernel = ExampleKernel;
     type Context = String;
 }

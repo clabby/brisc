@@ -6,9 +6,9 @@
 //! guest has overwritten.
 
 #[cfg(feature = "a")]
-use crate::memory::Address;
-use crate::memory::{page_base, page_index, Memory};
-use brisc_isa::{Word, XWord};
+use crate::bus::Address;
+use crate::bus::{page_base, page_index, Bus};
+use brisc_isa::XWord;
 
 mod code;
 use code::{slot_of, CodeCache, SLOTS};
@@ -55,16 +55,16 @@ impl Cpu {
         }
     }
 
-    /// Executes instructions from `memory` until `budget` of them have been retired, or until an
-    /// `ecall` or a [Fault] stops execution earlier.
+    /// Executes instructions from `bus` until `budget` of them have been retired, or until an
+    /// `ecall`, a [Fault] or an error of the bus stops execution earlier.
     ///
-    /// Decoded instructions stay coherent with `memory` as long as all writes to it go through
-    /// the [Memory] trait.
-    pub fn run<M: Memory>(&mut self, memory: &mut M, budget: u64) -> Stop {
+    /// The instructions that the hart has decoded stay coherent with `bus` as long as the bus
+    /// reports the writes to them, as [Bus] describes.
+    pub fn run<B: Bus>(&mut self, bus: &mut B, budget: u64) -> Stop<B::Error> {
         let mut remaining = budget;
 
         let stop = loop {
-            while let Some(page) = memory.pop_dirty() {
+            while let Some(page) = bus.pop_dirty() {
                 self.code.invalidate(page);
             }
             if remaining == 0 {
@@ -78,22 +78,22 @@ impl Cpu {
             let base = page_base(page);
 
             let (exit, pc) = if remaining >= SLOTS as u64 {
-                execute::<M, false>(
+                execute::<B, false>(
                     &mut self.registers,
                     #[cfg(feature = "a")]
                     &mut self.reservation,
-                    memory,
+                    bus,
                     code,
                     base,
                     slot,
                     &mut remaining,
                 )
             } else {
-                execute::<M, true>(
+                execute::<B, true>(
                     &mut self.registers,
                     #[cfg(feature = "a")]
                     &mut self.reservation,
-                    memory,
+                    bus,
                     code,
                     base,
                     slot,
@@ -104,15 +104,20 @@ impl Cpu {
 
             match exit {
                 Exit::Leave => {}
-                Exit::Decode => self.code.decode(memory, page, slot_of(pc)),
+                Exit::Decode => {
+                    if let Err(error) = self.code.decode(bus, page, slot_of(pc)) {
+                        break Stop::Bus(error);
+                    }
+                }
                 Exit::Ecall => break Stop::Ecall,
-                Exit::Illegal => {
-                    let fault = decode(Word::from_le_bytes(memory.load(pc)))
+                Exit::Illegal(word) => {
+                    let fault = decode(word)
                         .expect_err("an illegal slot holds a word that does not decode");
                     break Stop::Fault(fault);
                 }
                 #[cfg(feature = "a")]
                 Exit::Fault(fault) => break Stop::Fault(fault),
+                Exit::Bus(error) => break Stop::Bus(error),
             }
         };
 

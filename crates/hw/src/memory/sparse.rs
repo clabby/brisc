@@ -1,8 +1,9 @@
-//! A sparse, paged [Memory].
+//! A sparse, paged memory.
 
-use super::{page_index, page_offset, Address, Memory, PageIndex, PAGE_SIZE};
+use crate::bus::{page_index, page_offset, Address, Bus, PageIndex, PAGE_SIZE};
 use alloc::{boxed::Box, vec, vec::Vec};
-use core::fmt;
+use brisc_isa::Word;
+use core::{convert::Infallible, fmt};
 use hashbrown::HashMap;
 
 /// The number of entries in the translation cache.
@@ -10,7 +11,7 @@ const TLB_ENTRIES: usize = 1 << 10;
 
 /// A tag that matches no page: it is larger than [MAX_PAGE_INDEX].
 ///
-/// [MAX_PAGE_INDEX]: super::MAX_PAGE_INDEX
+/// [MAX_PAGE_INDEX]: crate::bus::MAX_PAGE_INDEX
 const NO_PAGE: PageIndex = PageIndex::MAX;
 
 /// A cached translation from a page to the frame that backs it.
@@ -37,7 +38,10 @@ struct Frame([u8; PAGE_SIZE]);
 
 const _: () = assert!(align_of::<Frame>() == PAGE_SIZE && size_of::<Frame>() == PAGE_SIZE);
 
-/// A [Memory] that maps pages on first write.
+/// A [Bus] that is all memory, with pages mapped on first write.
+///
+/// Every address is readable and writable, so no access fails. Memory that was never written
+/// reads as zero, and reading it does not map a page.
 ///
 /// Pages are backed by page-aligned 4 KiB frames in one contiguous allocation. A direct-mapped
 /// translation cache in front of the page table turns the common load or store into a tag
@@ -50,7 +54,7 @@ pub struct SparseMemory {
     pages: HashMap<PageIndex, u32>,
     /// Whether each frame's page is watched.
     watched: Vec<bool>,
-    /// Pages written while watched, not yet returned from [Memory::pop_dirty].
+    /// Pages written while watched, not yet returned from [Bus::pop_dirty].
     dirty: Vec<PageIndex>,
     /// The translation cache, indexed by the low bits of the page index.
     tlb: Box<[TlbEntry; TLB_ENTRIES]>,
@@ -73,6 +77,11 @@ impl SparseMemory {
             dirty: Vec::new(),
             tlb: tlb.into_boxed_slice().try_into().expect("the TLB has TLB_ENTRIES entries"),
         }
+    }
+
+    /// Returns the number of pages that have been written to or watched.
+    pub fn page_count(&self) -> usize {
+        self.pages.len()
     }
 
     /// Returns the frame number backing `page` and caches the translation.
@@ -126,6 +135,24 @@ impl SparseMemory {
             done += piece;
         }
     }
+
+    /// Fills `buf` with the bytes starting at `address`.
+    #[cold]
+    #[inline(never)]
+    fn copy_out(&mut self, address: Address, buf: &mut [u8]) {
+        self.for_each_piece(address, buf.len(), false, |range, frame| {
+            buf[range].copy_from_slice(frame);
+        });
+    }
+
+    /// Writes `data` starting at `address`, mapping pages and ending watches as needed.
+    #[cold]
+    #[inline(never)]
+    fn copy_in(&mut self, address: Address, data: &[u8]) {
+        self.for_each_piece(address, data.len(), true, |range, frame| {
+            frame.copy_from_slice(&data[range]);
+        });
+    }
 }
 
 impl fmt::Debug for SparseMemory {
@@ -134,9 +161,11 @@ impl fmt::Debug for SparseMemory {
     }
 }
 
-impl Memory for SparseMemory {
+impl Bus for SparseMemory {
+    type Error = Infallible;
+
     #[inline(always)]
-    fn load<const N: usize>(&mut self, address: Address) -> [u8; N] {
+    fn load<const N: usize>(&mut self, address: Address) -> Result<[u8; N], Infallible> {
         let page = page_index(address);
         let offset = page_offset(address);
         let entry = self.tlb[page as usize & (TLB_ENTRIES - 1)];
@@ -144,44 +173,48 @@ impl Memory for SparseMemory {
         if entry.read == page && offset + N <= PAGE_SIZE {
             let mut bytes = [0; N];
             bytes.copy_from_slice(&self.frames[entry.frame].0[offset..offset + N]);
-            bytes
+            Ok(bytes)
         } else {
             let mut bytes = [0; N];
-            self.read(address, &mut bytes);
-            bytes
+            self.copy_out(address, &mut bytes);
+            Ok(bytes)
         }
     }
 
     #[inline(always)]
-    fn store<const N: usize>(&mut self, address: Address, bytes: [u8; N]) -> bool {
+    fn store<const N: usize>(
+        &mut self,
+        address: Address,
+        bytes: [u8; N],
+    ) -> Result<bool, Infallible> {
         let page = page_index(address);
         let offset = page_offset(address);
         let entry = self.tlb[page as usize & (TLB_ENTRIES - 1)];
 
         if entry.write == page && offset + N <= PAGE_SIZE {
             self.frames[entry.frame].0[offset..offset + N].copy_from_slice(&bytes);
-            false
+            Ok(false)
         } else {
             let dirty = self.dirty.len();
-            self.write(address, &bytes);
-            self.dirty.len() != dirty
+            self.copy_in(address, &bytes);
+            Ok(self.dirty.len() != dirty)
         }
     }
 
-    #[cold]
-    #[inline(never)]
-    fn read(&mut self, address: Address, buf: &mut [u8]) {
-        self.for_each_piece(address, buf.len(), false, |range, frame| {
-            buf[range].copy_from_slice(frame);
-        });
+    /// Loads four bytes whatever the length of the instruction: every address is readable.
+    #[inline(always)]
+    fn fetch(&mut self, address: Address) -> Result<Word, Infallible> {
+        self.load(address).map(Word::from_le_bytes)
     }
 
-    #[cold]
-    #[inline(never)]
-    fn write(&mut self, address: Address, data: &[u8]) {
-        self.for_each_piece(address, data.len(), true, |range, frame| {
-            frame.copy_from_slice(&data[range]);
-        });
+    fn read(&mut self, address: Address, buf: &mut [u8]) -> Result<(), Infallible> {
+        self.copy_out(address, buf);
+        Ok(())
+    }
+
+    fn write(&mut self, address: Address, data: &[u8]) -> Result<(), Infallible> {
+        self.copy_in(address, data);
+        Ok(())
     }
 
     fn watch(&mut self, page: PageIndex) {
@@ -194,10 +227,6 @@ impl Memory for SparseMemory {
     fn pop_dirty(&mut self) -> Option<PageIndex> {
         self.dirty.pop()
     }
-
-    fn page_count(&self) -> usize {
-        self.pages.len()
-    }
 }
 
 #[cfg(test)]
@@ -209,9 +238,9 @@ mod test {
     #[test]
     fn unmapped_memory_reads_as_zero_without_mapping() {
         let mut memory = SparseMemory::new();
-        assert_eq!(memory.load::<8>(0x1234), [0; 8]);
+        assert_eq!(memory.load::<8>(0x1234), Ok([0; 8]));
         let mut buf = [1; 3 * PAGE_SIZE];
-        memory.read(PAGE - 5, &mut buf);
+        memory.read(PAGE - 5, &mut buf).unwrap();
         assert!(buf.iter().all(|byte| *byte == 0));
         assert_eq!(memory.page_count(), 0);
     }
@@ -219,11 +248,11 @@ mod test {
     #[test]
     fn store_after_load_of_unmapped_page_is_visible() {
         let mut memory = SparseMemory::new();
-        assert_eq!(memory.load::<4>(0x2000), [0; 4]);
-        assert!(!memory.store(0x2000, [1, 2, 3, 4]));
-        assert_eq!(memory.load::<4>(0x2000), [1, 2, 3, 4]);
+        assert_eq!(memory.load::<4>(0x2000), Ok([0; 4]));
+        assert_eq!(memory.store(0x2000, [1, 2, 3, 4]), Ok(false));
+        assert_eq!(memory.load::<4>(0x2000), Ok([1, 2, 3, 4]));
         // The zero frame is still zero for other unmapped pages.
-        assert_eq!(memory.load::<4>(0x3000), [0; 4]);
+        assert_eq!(memory.load::<4>(0x3000), Ok([0; 4]));
         assert_eq!(memory.page_count(), 1);
     }
 
@@ -233,9 +262,9 @@ mod test {
         let bytes = [1, 2, 3, 4, 5, 6, 7, 8];
         for offset in 1..8 {
             let address = 7 * PAGE - offset;
-            assert!(!memory.store(address, bytes));
-            assert_eq!(memory.load::<8>(address), bytes);
-            assert_eq!(memory.load::<1>(7 * PAGE), [bytes[offset as usize]]);
+            assert_eq!(memory.store(address, bytes), Ok(false));
+            assert_eq!(memory.load::<8>(address), Ok(bytes));
+            assert_eq!(memory.load::<1>(7 * PAGE), Ok([bytes[offset as usize]]));
         }
         assert_eq!(memory.page_count(), 2);
     }
@@ -243,26 +272,26 @@ mod test {
     #[test]
     fn unmapped_page_below_a_mapped_page_reads_as_zero() {
         let mut memory = SparseMemory::new();
-        memory.store(2 * PAGE, [0xff; 8]);
-        assert_eq!(memory.load::<8>(PAGE), [0; 8]);
-        assert_eq!(memory.load::<4>(2 * PAGE - 2), [0, 0, 0xff, 0xff]);
+        memory.store(2 * PAGE, [0xff; 8]).unwrap();
+        assert_eq!(memory.load::<8>(PAGE), Ok([0; 8]));
+        assert_eq!(memory.load::<4>(2 * PAGE - 2), Ok([0, 0, 0xff, 0xff]));
     }
 
     #[test]
     fn addresses_wrap_around() {
         let mut memory = SparseMemory::new();
-        memory.store(Address::MAX - 1, [1, 2, 3, 4]);
-        assert_eq!(memory.load::<2>(Address::MAX - 1), [1, 2]);
-        assert_eq!(memory.load::<2>(0), [3, 4]);
+        memory.store(Address::MAX - 1, [1, 2, 3, 4]).unwrap();
+        assert_eq!(memory.load::<2>(Address::MAX - 1), Ok([1, 2]));
+        assert_eq!(memory.load::<2>(0), Ok([3, 4]));
     }
 
     #[test]
     fn bulk_write_and_read_round_trip() {
         let mut memory = SparseMemory::new();
         let data = (0..3 * PAGE_SIZE + 17).map(|i| i as u8).collect::<Vec<_>>();
-        memory.write(PAGE - 9, &data);
+        memory.write(PAGE - 9, &data).unwrap();
         let mut buf = vec![0; data.len()];
-        memory.read(PAGE - 9, &mut buf);
+        memory.read(PAGE - 9, &mut buf).unwrap();
         assert_eq!(buf, data);
         assert_eq!(memory.page_count(), 5);
     }
@@ -270,22 +299,22 @@ mod test {
     #[test]
     fn first_write_to_a_watched_page_is_reported_once() {
         let mut memory = SparseMemory::new();
-        memory.store(5 * PAGE, [1; 4]);
+        memory.store(5 * PAGE, [1; 4]).unwrap();
         memory.watch(5);
         memory.watch(6);
-        assert_eq!(memory.load::<4>(5 * PAGE), [1; 4]);
+        assert_eq!(memory.load::<4>(5 * PAGE), Ok([1; 4]));
         assert_eq!(memory.pop_dirty(), None);
 
         // A store that straddles both watched pages reports both.
-        assert!(memory.store(6 * PAGE - 2, [2; 4]));
-        assert_eq!(memory.load::<4>(6 * PAGE - 2), [2; 4]);
+        assert_eq!(memory.store(6 * PAGE - 2, [2; 4]), Ok(true));
+        assert_eq!(memory.load::<4>(6 * PAGE - 2), Ok([2; 4]));
         let mut dirty = [memory.pop_dirty(), memory.pop_dirty(), memory.pop_dirty()];
         dirty.sort();
         assert_eq!(dirty, [None, Some(5), Some(6)]);
 
         // The watch ended with the first write.
-        assert!(!memory.store(5 * PAGE, [3; 4]));
-        memory.write(6 * PAGE, &[3; 4]);
+        assert_eq!(memory.store(5 * PAGE, [3; 4]), Ok(false));
+        memory.write(6 * PAGE, &[3; 4]).unwrap();
         assert_eq!(memory.pop_dirty(), None);
     }
 
@@ -293,7 +322,7 @@ mod test {
     fn bulk_write_to_a_watched_page_is_reported() {
         let mut memory = SparseMemory::new();
         memory.watch(1);
-        memory.write(PAGE + 100, &[7; 16]);
+        memory.write(PAGE + 100, &[7; 16]).unwrap();
         assert_eq!(memory.pop_dirty(), Some(1));
     }
 }

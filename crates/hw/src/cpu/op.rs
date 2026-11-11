@@ -60,11 +60,14 @@ impl Op {
     /// A slot past the last instruction of a page.
     pub(super) const PAGE_END: Self = Self::bare(code::PAGE_END);
 
-    /// A slot whose word is not an instruction the hart can execute.
-    pub(super) const ILLEGAL: Self = Self::bare(code::ILLEGAL);
-
     const fn bare(code: u8) -> Self {
         Self { code, rd: 0, rs1: 0, rs2: 0, imm: 0 }
+    }
+
+    /// A slot whose `word` is not an instruction the hart can execute. The word is kept in the
+    /// immediate, for [decode] to say what is wrong with it.
+    pub(super) const fn illegal(word: Word) -> Self {
+        Self { imm: word as i32, ..Self::bare(code::ILLEGAL) }
     }
 
     /// Returns the [Op::code] of an instruction with this opcode that is `length` bytes long.
@@ -96,6 +99,7 @@ impl Op {
 }
 
 /// Decodes the instruction in the low bits of `word`.
+#[inline(always)]
 pub(super) const fn decode(word: Word) -> Result<Instruction, Fault> {
     match Instruction::decode(word) {
         Ok(instruction) => Ok(instruction),

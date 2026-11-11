@@ -2,12 +2,13 @@
 
 use crate::{
     cfg::EmuConfig,
-    kernel::{AsyncKernel, Kernel, Syscall},
+    kernel::{AsyncKernel, Kernel, Syscall, SyscallError},
     st::StEmu,
 };
 use brisc_hw::{
+    bus::Bus,
     cpu::{Registers, Stop},
-    memory::{Memory, SparseMemory},
+    memory::SparseMemory,
     XWord, REG_A0, REG_A1, REG_A2, REG_A7,
 };
 use std::{
@@ -125,7 +126,7 @@ fn run_in_slices(elf: &[u8], budget: u64) -> u64 {
     let mut emu = TestProgram::load(elf).0;
     loop {
         let retired = emu.cpu.instret;
-        let stop = emu.cpu.run(&mut emu.memory, budget);
+        let stop = emu.cpu.run(&mut emu.bus, budget);
         match stop {
             Stop::Budget => assert_eq!(emu.cpu.instret - retired, budget),
             Stop::Ecall => {
@@ -133,7 +134,7 @@ fn run_in_slices(elf: &[u8], budget: u64) -> u64 {
                 let syscall = Kernel::syscall(
                     &mut emu.kernel,
                     emu.cpu.registers.get(REG_A7),
-                    &mut emu.memory,
+                    &mut emu.bus,
                     &mut emu.cpu.registers,
                     &mut emu.ctx,
                 )
@@ -147,6 +148,7 @@ fn run_in_slices(elf: &[u8], budget: u64) -> u64 {
                 }
             }
             Stop::Fault(fault) => panic!("{fault}"),
+            Stop::Bus(error) => match error {},
         }
     }
 }
@@ -155,7 +157,7 @@ fn run_in_slices(elf: &[u8], budget: u64) -> u64 {
 struct TestStEmuConfig;
 
 impl EmuConfig<'_> for TestStEmuConfig {
-    type Memory = SparseMemory;
+    type Bus = SparseMemory;
 
     type Kernel = RiscvTestKernel;
 
@@ -167,7 +169,7 @@ impl EmuConfig<'_> for TestStEmuConfig {
 struct SuspendingConfig;
 
 impl EmuConfig<'_> for SuspendingConfig {
-    type Memory = SparseMemory;
+    type Bus = SparseMemory;
 
     type Kernel = SuspendingKernel;
 
@@ -183,13 +185,13 @@ impl Kernel<u64> for RiscvTestKernel {
     /// The number of the unsupported system call.
     type Error = XWord;
 
-    fn syscall<M: Memory>(
+    fn syscall<B: Bus>(
         &mut self,
         sysno: XWord,
-        mem: &mut M,
+        bus: &mut B,
         registers: &mut Registers,
         serviced: &mut u64,
-    ) -> Result<Syscall, Self::Error> {
+    ) -> Result<Syscall, SyscallError<XWord, B::Error>> {
         *serviced += 1;
         match sysno {
             0x5D => Ok(Syscall::Exit(registers.get(REG_A0))),
@@ -199,7 +201,7 @@ impl Kernel<u64> for RiscvTestKernel {
                 let len = registers.get(REG_A2);
 
                 let mut raw_msg = vec![0; len as usize];
-                mem.read(ptr, &mut raw_msg);
+                bus.read(ptr, &mut raw_msg)?;
                 let msg = String::from_utf8_lossy(&raw_msg);
 
                 if fd == 1 {
@@ -209,7 +211,7 @@ impl Kernel<u64> for RiscvTestKernel {
                 }
                 Ok(Syscall::Continue)
             }
-            _ => Err(sysno),
+            _ => Err(SyscallError::Kernel(sysno)),
         }
     }
 }
@@ -221,15 +223,15 @@ struct SuspendingKernel(RiscvTestKernel);
 impl AsyncKernel<u64> for SuspendingKernel {
     type Error = XWord;
 
-    async fn syscall<M: Memory>(
+    async fn syscall<B: Bus>(
         &mut self,
         sysno: XWord,
-        mem: &mut M,
+        bus: &mut B,
         registers: &mut Registers,
         serviced: &mut u64,
-    ) -> Result<Syscall, Self::Error> {
+    ) -> Result<Syscall, SyscallError<XWord, B::Error>> {
         SuspendOnce(false).await;
-        Kernel::syscall(&mut self.0, sysno, mem, registers, serviced)
+        Kernel::syscall(&mut self.0, sysno, bus, registers, serviced)
     }
 }
 

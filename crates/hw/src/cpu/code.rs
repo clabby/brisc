@@ -1,11 +1,9 @@
 //! The cache of decoded instructions.
 
 use super::op::{code, decode, Op};
-use crate::memory::{
-    page_base, page_offset, Address, Memory, PageIndex, MAX_PAGE_INDEX, PAGE_SIZE,
-};
+use crate::bus::{page_base, page_offset, Address, Bus, PageIndex, MAX_PAGE_INDEX, PAGE_SIZE};
 use alloc::{boxed::Box, vec, vec::Vec};
-use brisc_isa::{is_compressed, Opcode, Word};
+use brisc_isa::{is_compressed, Opcode};
 use core::fmt;
 use hashbrown::HashMap;
 
@@ -56,21 +54,34 @@ impl CodeCache {
 
     /// Decodes the instructions of `page` from `slot` up to the first one that is already decoded
     /// or that execution cannot fall through.
+    ///
+    /// Returns the error of the bus if the instruction at `slot` cannot be fetched. A later
+    /// instruction that cannot be fetched is left for when execution reaches it.
     #[cold]
-    pub(super) fn decode<M: Memory>(&mut self, memory: &mut M, page: PageIndex, mut slot: usize) {
+    pub(super) fn decode<B: Bus>(
+        &mut self,
+        bus: &mut B,
+        page: PageIndex,
+        first: usize,
+    ) -> Result<(), B::Error> {
         let position = self.position(page);
-        memory.watch(page);
+        bus.watch(page);
 
+        let mut slot = first;
         while slot < SLOTS && self.pages[position][slot].code == code::DECODE {
             let address = page_base(page).wrapping_add((slot as Address) << 1);
-            let word = Word::from_le_bytes(memory.load(address));
+            let word = match bus.fetch(address) {
+                Ok(word) => word,
+                Err(error) if slot == first => return Err(error),
+                Err(_) => break,
+            };
             if slot == SLOTS - 1 && !is_compressed(word) {
                 // The word continues on the next page, whether or not it is an instruction.
-                memory.watch(page.wrapping_add(1) & MAX_PAGE_INDEX);
+                bus.watch(page.wrapping_add(1) & MAX_PAGE_INDEX);
             }
 
             let Ok(instruction) = decode(word) else {
-                self.pages[position][slot] = Op::ILLEGAL;
+                self.pages[position][slot] = Op::illegal(word);
                 break;
             };
             self.pages[position][slot] = Op::new(instruction);
@@ -79,6 +90,7 @@ impl CodeCache {
             }
             slot += instruction.length as usize / 2;
         }
+        Ok(())
     }
 
     /// Forgets the instructions decoded from the bytes of `page`.

@@ -1,8 +1,10 @@
 //! A builder for the [`StEmu`] emulator.
 
-use super::StEmu;
-use crate::{cfg::EmuConfig, elf::load_elf};
-use alloc::string::String;
+use super::{BusError, StEmu};
+use crate::{
+    cfg::EmuConfig,
+    elf::{load_elf, LoadError},
+};
 use brisc_hw::{cpu::Cpu, XWord};
 
 /// A builder for the [`StEmu`] emulator.
@@ -13,8 +15,8 @@ where
 {
     /// The starting program counter.
     pub pc: XWord,
-    /// The initial memory for the emulator.
-    pub memory: Option<Config::Memory>,
+    /// The bus of the emulator.
+    pub bus: Option<Config::Bus>,
     /// The system call interface for the emulator.
     pub kernel: Option<Config::Kernel>,
     /// The emulator's state.
@@ -26,20 +28,23 @@ where
     Config: EmuConfig<'ctx>,
 {
     fn default() -> Self {
-        Self { pc: 0, memory: None, kernel: None, state: None }
+        Self { pc: 0, bus: None, kernel: None, state: None }
     }
 }
 
 impl<'ctx, Config> StEmuBuilder<'ctx, Config>
 where
     Config: EmuConfig<'ctx>,
-    Config::Memory: Default,
+    Config::Bus: Default,
 {
-    /// Loads an elf file into the emulator builder, initializing the program counter and memory.
-    pub fn with_elf(mut self, elf_bytes: &[u8]) -> Result<Self, String> {
-        let (memory, entry_pc) = load_elf::<Config::Memory>(elf_bytes)?;
-        self.pc = entry_pc;
-        self.memory = Some(memory);
+    /// Loads an ELF file and sets the program counter to its entry point.
+    ///
+    /// The file is loaded onto the bus assigned with [StEmuBuilder::with_bus], or onto a
+    /// default one if none has been assigned.
+    pub fn with_elf(mut self, elf_bytes: &[u8]) -> Result<Self, LoadError<BusError<'ctx, Config>>> {
+        let mut bus = self.bus.take().unwrap_or_default();
+        self.pc = load_elf(&mut bus, elf_bytes)?;
+        self.bus = Some(bus);
         Ok(self)
     }
 }
@@ -54,9 +59,9 @@ where
         self
     }
 
-    /// Assigns a pre-created memory instance to the emulator.
-    pub fn with_memory(mut self, memory: Config::Memory) -> Self {
-        self.memory = Some(memory);
+    /// Assigns the bus to the emulator.
+    pub fn with_bus(mut self, bus: Config::Bus) -> Self {
+        self.bus = Some(bus);
         self
     }
 
@@ -76,11 +81,11 @@ where
     ///
     /// ## Panics
     ///
-    /// Panics if the memory, kernel or state is not set.
+    /// Panics if the bus, kernel or state is not set.
     pub fn build(self) -> StEmu<'ctx, Config> {
         StEmu {
             cpu: Cpu::new(self.pc),
-            memory: self.memory.expect("Memory not instantiated"),
+            bus: self.bus.expect("Bus not instantiated"),
             kernel: self.kernel.expect("Kernel not instantiated"),
             ctx: self.state.expect("State not instantiated"),
         }
