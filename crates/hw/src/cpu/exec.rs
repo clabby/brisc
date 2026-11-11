@@ -92,7 +92,14 @@ macro_rules! dispatch {
                 let $advance: usize = 2;
                 $body
             })*
-            _ => unreachable!("slots only hold the codes of instructions that decode"),
+            _ => {
+                debug_assert!(false, "slots only hold the codes of instructions that decode");
+                // SAFETY: A slot only ever holds an [Op], and the constructors of [Op] only
+                // produce the codes that are matched above: the assertion above ties the arms
+                // to the instructions that decode, and the constructors take their codes from
+                // those instructions and from the codes that are not instructions.
+                unsafe { core::hint::unreachable_unchecked() }
+            }
         }
     }};
 }
@@ -105,6 +112,19 @@ macro_rules! codes {
                 $crate::cpu::op::Op::code_for(brisc_isa::Opcode::$name, $length);
         )+
     };
+}
+
+/// Returns the [Op] in `slot` of `code`.
+///
+/// The lookup needs no bounds check because the interpreter never moves `slot` out of bounds:
+/// it starts below [SLOTS]; an instruction at a slot below [SLOTS] moves it on by one or two, to
+/// at most `SLOTS + 1`; the two slots from [SLOTS] on hold the code that stops the loop without
+/// moving `slot`; and a branch or jump only moves it to a target below [SLOTS].
+#[inline(always)]
+fn op_at(code: &CodePage, slot: usize) -> Op {
+    debug_assert!(slot < code.len());
+    // SAFETY: `slot` is in bounds, as argued above.
+    unsafe { *code.get_unchecked(slot) }
 }
 
 /// Executes the instructions of one page of decoded `code`, starting at `slot`, until execution
@@ -154,7 +174,7 @@ pub(super) fn execute<B: Bus, const PRECISE: bool>(
         if PRECISE && n == 0 {
             break (Exit::Leave, pc!());
         }
-        let op: Op = code[slot];
+        let op = op_at(code, slot);
         n -= 1;
 
         macro_rules! rs1 {
