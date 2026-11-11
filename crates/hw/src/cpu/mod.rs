@@ -27,9 +27,6 @@ pub use registers::Registers;
 mod stop;
 pub use stop::{Fault, Stop};
 
-#[cfg(test)]
-mod test;
-
 /// A RISC-V hart.
 #[derive(Debug)]
 pub struct Cpu {

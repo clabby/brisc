@@ -2,10 +2,10 @@
 
 use crate::{cfg::EmuConfig, st::StEmu};
 use brisc_hw::{
-    cpu::Registers,
+    cpu::{Registers, Stop},
     kernel::{AsyncKernel, Kernel, Syscall},
     memory::{Memory, SparseMemory},
-    XWord, REG_A0, REG_A1, REG_A2,
+    XWord, REG_A0, REG_A1, REG_A2, REG_A7,
 };
 use std::{
     fs,
@@ -84,8 +84,9 @@ impl TestProgram {
 
 /// Runs the test program at `test_path` and returns the number of instructions it retired.
 ///
-/// The program is run twice: with a synchronous kernel, and with an asynchronous kernel that
-/// suspends on every system call. Both runs must retire the same instructions.
+/// The program is run with a synchronous kernel, with an asynchronous kernel that suspends on
+/// every system call, and in slices of a few instruction budgets. All runs must retire the same
+/// instructions.
 pub fn run_riscv_test(test_path: &PathBuf) -> u64 {
     let elf = fs::read(test_path).unwrap();
     let instructions = TestProgram::load(&elf).run();
@@ -101,7 +102,50 @@ pub fn run_riscv_test(test_path: &PathBuf) -> u64 {
     // Every program exits through a system call, which the kernel counted in the context.
     assert!(emu.take_ctx() > 0);
 
+    // The budgets surround the number of instructions the interpreter can run between checks of
+    // its budget, which is what separates its exact and its fast mode.
+    for budget in [1, 3, 2047, 2049] {
+        assert_eq!(run_in_slices(&elf, budget), instructions, "budget: {budget}");
+    }
+
     instructions
+}
+
+/// Runs the program with the processor limited to `budget` instructions at a time and returns the
+/// number of instructions retired.
+///
+/// ## Panics
+///
+/// Panics if the program does not exit with code zero or if a slice retires the wrong number of
+/// instructions.
+fn run_in_slices(elf: &[u8], budget: u64) -> u64 {
+    let mut emu = TestProgram::load(elf).0;
+    loop {
+        let retired = emu.cpu.instret;
+        let stop = emu.cpu.run(&mut emu.memory, budget);
+        match stop {
+            Stop::Budget => assert_eq!(emu.cpu.instret - retired, budget),
+            Stop::Ecall => {
+                assert!(emu.cpu.instret - retired <= budget);
+                let syscall = Kernel::syscall(
+                    &mut emu.kernel,
+                    emu.cpu.registers.get(REG_A7),
+                    &mut emu.memory,
+                    &mut emu.cpu.registers,
+                    &mut emu.ctx,
+                )
+                .unwrap();
+                match syscall {
+                    Syscall::Continue => emu.cpu.pc = emu.cpu.pc.wrapping_add(4),
+                    Syscall::Exit(code) => {
+                        assert_eq!(code, 0);
+                        return emu.cpu.instret;
+                    }
+                }
+            }
+            Stop::Fault(fault) => panic!("{fault}"),
+        }
+    }
 }
 
 #[derive(Default, Debug)]
