@@ -23,6 +23,19 @@ impl JType {
                 (bits!(i32, instruction, 21..31) << 1),
         }
     }
+
+    /// Encodes the fields as a 32-bit [Word] whose opcode, the low seven bits, is zero.
+    ///
+    /// A field that is too large for its place in the word loses its upper bits, and the
+    /// immediate its lowest bit.
+    pub const fn encode(&self) -> Word {
+        let imm = self.imm as Word;
+        (self.rd as Word & 0x1f) << 7 |
+            bits!(Word, imm, 12..20) << 12 |
+            bits!(Word, imm, 11..12) << 20 |
+            bits!(Word, imm, 1..11) << 21 |
+            bits!(Word, imm, 20..21) << 31
+    }
 }
 
 #[cfg(test)]

@@ -173,3 +173,48 @@ pub const REG_T5: usize = 30;
 
 /// temporary register 6
 pub const REG_T6: usize = 31;
+
+/// The names that the standard calling convention gives the integer registers `x0` to `x31`.
+pub const REGISTER_NAMES: [&str; 32] = [
+    "zero", "ra", "sp", "gp", "tp", "t0", "t1", "t2", "s0", "s1", "a0", "a1", "a2", "a3", "a4",
+    "a5", "a6", "a7", "s2", "s3", "s4", "s5", "s6", "s7", "s8", "s9", "s10", "s11", "t3", "t4",
+    "t5", "t6",
+];
+
+/// Returns the index of the integer register called `name`: `x0` to `x31`, one of the
+/// [REGISTER_NAMES], or `fp`, the other name of `s0`.
+pub const fn register_index(name: &str) -> Option<u8> {
+    match name.as_bytes() {
+        b"fp" => return Some(REG_S0_FP as u8),
+        [b'x', digit @ b'0'..=b'9'] => return Some(*digit - b'0'),
+        [b'x', tens @ b'1'..=b'3', digit @ b'0'..=b'9'] => {
+            let index = (*tens - b'0') * 10 + (*digit - b'0');
+            return if index < 32 { Some(index) } else { None };
+        }
+        _ => {}
+    }
+
+    let mut index = 0;
+    while index < REGISTER_NAMES.len() {
+        if bytes_eq(REGISTER_NAMES[index].as_bytes(), name.as_bytes()) {
+            return Some(index as u8);
+        }
+        index += 1;
+    }
+    None
+}
+
+/// Compares two byte strings, which `==` cannot do in a `const fn`.
+pub(crate) const fn bytes_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut i = 0;
+    while i < a.len() {
+        if a[i] != b[i] {
+            return false;
+        }
+        i += 1;
+    }
+    true
+}

@@ -1,13 +1,50 @@
 //! The instructions of the supported instruction sets, by mnemonic.
 
+use crate::{arch::bytes_eq, Word};
 use core::fmt;
 
-/// Defines [Opcode] from one row per instruction: the documentation, the variant, the mnemonic
-/// and the crate features the instruction requires.
+/// The operands of an instruction, in the order assembly language writes them, and with that the
+/// fields of the 32-bit encoding that hold them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Format {
+    /// No operands.
+    None,
+    /// `rd, rs1, rs2`
+    R,
+    /// `rs1, rs2`: the fields of [Format::R] without a destination.
+    Sources,
+    /// `rd, rs1, imm`
+    I,
+    /// `rd, imm(rs1)`: the fields of [Format::I], written as a register and an address.
+    Load,
+    /// `rs2, imm(rs1)`
+    S,
+    /// `rs1, rs2, imm`, where the immediate is an offset from the instruction.
+    B,
+    /// `rd, imm`, where assembly language writes the upper 20 bits of the immediate.
+    U,
+    /// `rd, imm`, where the immediate is an offset from the instruction.
+    J,
+    /// `rd, (rs1)`: the fields of [Format::R] without a second source, and the ordering
+    /// constraints in the immediate.
+    Lr,
+    /// `rd, rs2, (rs1)`: the fields of [Format::R], and the ordering constraints in the
+    /// immediate.
+    Amo,
+    /// `rd, csr, rs1`: the fields of [Format::I], with the address of the CSR as the immediate.
+    Csr,
+    /// `rd, csr, uimm`: as [Format::Csr], with a 5-bit immediate in the place of `rs1`.
+    CsrI,
+}
+
+/// Defines [Opcode] from one row per instruction: the documentation, the variant, the mnemonic,
+/// the [Format], the bits of the 32-bit encoding that are not operands, and the crate features
+/// the instruction requires.
 macro_rules! opcodes {
     ($(
         $(#[$doc:meta])*
-        $name:ident = $mnemonic:literal $(, requires($($feature:literal),+))?;
+        $name:ident = $mnemonic:literal, $format:ident, $bits:literal
+            $(, requires($($feature:literal),+))?;
     )*) => {
         /// An instruction of the base ISA or of one of the extensions this crate knows, without
         /// its operands.
@@ -32,6 +69,21 @@ macro_rules! opcodes {
                 }
             }
 
+            /// Returns the operands the instruction has.
+            pub const fn format(self) -> Format {
+                match self {
+                    $(Self::$name => Format::$format,)*
+                }
+            }
+
+            /// Returns the bits that every 32-bit encoding of the instruction has in common: the
+            /// opcode and function fields, with the fields of the operands zero.
+            pub const fn fixed_bits(self) -> Word {
+                match self {
+                    $(Self::$name => $bits,)*
+                }
+            }
+
             /// Returns whether the instruction belongs to the instruction set selected by the
             /// crate features.
             pub const fn is_supported(self) -> bool {
@@ -46,221 +98,249 @@ macro_rules! opcodes {
 opcodes! {
     // RV32I
     /// Load upper immediate.
-    Lui = "lui";
+    Lui = "lui", U, 0x0000_0037;
     /// Add upper immediate to the program counter.
-    Auipc = "auipc";
+    Auipc = "auipc", U, 0x0000_0017;
     /// Jump and link.
-    Jal = "jal";
+    Jal = "jal", J, 0x0000_006f;
     /// Jump and link register.
-    Jalr = "jalr";
+    Jalr = "jalr", Load, 0x0000_0067;
     /// Branch if equal.
-    Beq = "beq";
+    Beq = "beq", B, 0x0000_0063;
     /// Branch if not equal.
-    Bne = "bne";
+    Bne = "bne", B, 0x0000_1063;
     /// Branch if less than, signed.
-    Blt = "blt";
+    Blt = "blt", B, 0x0000_4063;
     /// Branch if greater than or equal, signed.
-    Bge = "bge";
+    Bge = "bge", B, 0x0000_5063;
     /// Branch if less than, unsigned.
-    Bltu = "bltu";
+    Bltu = "bltu", B, 0x0000_6063;
     /// Branch if greater than or equal, unsigned.
-    Bgeu = "bgeu";
+    Bgeu = "bgeu", B, 0x0000_7063;
     /// Load a byte, sign-extended.
-    Lb = "lb";
+    Lb = "lb", Load, 0x0000_0003;
     /// Load a halfword, sign-extended.
-    Lh = "lh";
+    Lh = "lh", Load, 0x0000_1003;
     /// Load a word, sign-extended.
-    Lw = "lw";
+    Lw = "lw", Load, 0x0000_2003;
     /// Load a byte, zero-extended.
-    Lbu = "lbu";
+    Lbu = "lbu", Load, 0x0000_4003;
     /// Load a halfword, zero-extended.
-    Lhu = "lhu";
+    Lhu = "lhu", Load, 0x0000_5003;
     /// Store a byte.
-    Sb = "sb";
+    Sb = "sb", S, 0x0000_0023;
     /// Store a halfword.
-    Sh = "sh";
+    Sh = "sh", S, 0x0000_1023;
     /// Store a word.
-    Sw = "sw";
+    Sw = "sw", S, 0x0000_2023;
     /// Add an immediate.
-    Addi = "addi";
+    Addi = "addi", I, 0x0000_0013;
     /// Set if less than an immediate, signed.
-    Slti = "slti";
+    Slti = "slti", I, 0x0000_2013;
     /// Set if less than an immediate, unsigned.
-    Sltiu = "sltiu";
+    Sltiu = "sltiu", I, 0x0000_3013;
     /// Exclusive or with an immediate.
-    Xori = "xori";
+    Xori = "xori", I, 0x0000_4013;
     /// Or with an immediate.
-    Ori = "ori";
+    Ori = "ori", I, 0x0000_6013;
     /// And with an immediate.
-    Andi = "andi";
+    Andi = "andi", I, 0x0000_7013;
     /// Shift left by an immediate.
-    Slli = "slli";
+    Slli = "slli", I, 0x0000_1013;
     /// Shift right by an immediate, filling with zeros.
-    Srli = "srli";
+    Srli = "srli", I, 0x0000_5013;
     /// Shift right by an immediate, filling with the sign.
-    Srai = "srai";
+    Srai = "srai", I, 0x4000_5013;
     /// Add.
-    Add = "add";
+    Add = "add", R, 0x0000_0033;
     /// Subtract.
-    Sub = "sub";
+    Sub = "sub", R, 0x4000_0033;
     /// Shift left.
-    Sll = "sll";
+    Sll = "sll", R, 0x0000_1033;
     /// Set if less than, signed.
-    Slt = "slt";
+    Slt = "slt", R, 0x0000_2033;
     /// Set if less than, unsigned.
-    Sltu = "sltu";
+    Sltu = "sltu", R, 0x0000_3033;
     /// Exclusive or.
-    Xor = "xor";
+    Xor = "xor", R, 0x0000_4033;
     /// Shift right, filling with zeros.
-    Srl = "srl";
+    Srl = "srl", R, 0x0000_5033;
     /// Shift right, filling with the sign.
-    Sra = "sra";
+    Sra = "sra", R, 0x4000_5033;
     /// Or.
-    Or = "or";
+    Or = "or", R, 0x0000_6033;
     /// And.
-    And = "and";
+    And = "and", R, 0x0000_7033;
     /// Order memory and device accesses as seen by other harts and devices.
-    Fence = "fence";
+    Fence = "fence", I, 0x0000_000f;
     /// Call the execution environment.
-    Ecall = "ecall";
+    Ecall = "ecall", None, 0x0000_0073;
     /// Return control to a debugger.
-    Ebreak = "ebreak";
+    Ebreak = "ebreak", None, 0x0010_0073;
 
     // RV64I
     /// Load a word, zero-extended.
-    Lwu = "lwu", requires("64-bit");
+    Lwu = "lwu", Load, 0x0000_6003, requires("64-bit");
     /// Load a doubleword.
-    Ld = "ld", requires("64-bit");
+    Ld = "ld", Load, 0x0000_3003, requires("64-bit");
     /// Store a doubleword.
-    Sd = "sd", requires("64-bit");
+    Sd = "sd", S, 0x0000_3023, requires("64-bit");
     /// Add an immediate to a word.
-    Addiw = "addiw", requires("64-bit");
+    Addiw = "addiw", I, 0x0000_001b, requires("64-bit");
     /// Shift a word left by an immediate.
-    Slliw = "slliw", requires("64-bit");
+    Slliw = "slliw", I, 0x0000_101b, requires("64-bit");
     /// Shift a word right by an immediate, filling with zeros.
-    Srliw = "srliw", requires("64-bit");
+    Srliw = "srliw", I, 0x0000_501b, requires("64-bit");
     /// Shift a word right by an immediate, filling with the sign.
-    Sraiw = "sraiw", requires("64-bit");
+    Sraiw = "sraiw", I, 0x4000_501b, requires("64-bit");
     /// Add words.
-    Addw = "addw", requires("64-bit");
+    Addw = "addw", R, 0x0000_003b, requires("64-bit");
     /// Subtract words.
-    Subw = "subw", requires("64-bit");
+    Subw = "subw", R, 0x4000_003b, requires("64-bit");
     /// Shift a word left.
-    Sllw = "sllw", requires("64-bit");
+    Sllw = "sllw", R, 0x0000_103b, requires("64-bit");
     /// Shift a word right, filling with zeros.
-    Srlw = "srlw", requires("64-bit");
+    Srlw = "srlw", R, 0x0000_503b, requires("64-bit");
     /// Shift a word right, filling with the sign.
-    Sraw = "sraw", requires("64-bit");
+    Sraw = "sraw", R, 0x4000_503b, requires("64-bit");
 
     // Zifencei
     /// Make stores to instruction memory visible to instruction fetches.
-    FenceI = "fence.i";
+    FenceI = "fence.i", I, 0x0000_100f;
 
     // Zicsr
     /// Swap a register with a control and status register.
-    Csrrw = "csrrw";
+    Csrrw = "csrrw", Csr, 0x0000_1073;
     /// Read a control and status register and set the bits of a register in it.
-    Csrrs = "csrrs";
+    Csrrs = "csrrs", Csr, 0x0000_2073;
     /// Read a control and status register and clear the bits of a register in it.
-    Csrrc = "csrrc";
+    Csrrc = "csrrc", Csr, 0x0000_3073;
     /// Read a control and status register and write an immediate to it.
-    Csrrwi = "csrrwi";
+    Csrrwi = "csrrwi", CsrI, 0x0000_5073;
     /// Read a control and status register and set the bits of an immediate in it.
-    Csrrsi = "csrrsi";
+    Csrrsi = "csrrsi", CsrI, 0x0000_6073;
     /// Read a control and status register and clear the bits of an immediate in it.
-    Csrrci = "csrrci";
+    Csrrci = "csrrci", CsrI, 0x0000_7073;
 
     // Privileged architecture
     /// Return from a trap taken in supervisor mode.
-    Sret = "sret";
+    Sret = "sret", None, 0x1020_0073;
     /// Return from a trap taken in machine mode.
-    Mret = "mret";
+    Mret = "mret", None, 0x3020_0073;
     /// Wait for an interrupt.
-    Wfi = "wfi";
+    Wfi = "wfi", None, 0x1050_0073;
     /// Make changes to the page tables visible to address translation.
-    SfenceVma = "sfence.vma";
+    SfenceVma = "sfence.vma", Sources, 0x1200_0073;
 
     // M
     /// Multiply, low half of the product.
-    Mul = "mul", requires("m");
+    Mul = "mul", R, 0x0200_0033, requires("m");
     /// Multiply signed by signed, high half of the product.
-    Mulh = "mulh", requires("m");
+    Mulh = "mulh", R, 0x0200_1033, requires("m");
     /// Multiply signed by unsigned, high half of the product.
-    Mulhsu = "mulhsu", requires("m");
+    Mulhsu = "mulhsu", R, 0x0200_2033, requires("m");
     /// Multiply unsigned by unsigned, high half of the product.
-    Mulhu = "mulhu", requires("m");
+    Mulhu = "mulhu", R, 0x0200_3033, requires("m");
     /// Divide, signed.
-    Div = "div", requires("m");
+    Div = "div", R, 0x0200_4033, requires("m");
     /// Divide, unsigned.
-    Divu = "divu", requires("m");
+    Divu = "divu", R, 0x0200_5033, requires("m");
     /// Remainder, signed.
-    Rem = "rem", requires("m");
+    Rem = "rem", R, 0x0200_6033, requires("m");
     /// Remainder, unsigned.
-    Remu = "remu", requires("m");
+    Remu = "remu", R, 0x0200_7033, requires("m");
 
     // RV64M
     /// Multiply words.
-    Mulw = "mulw", requires("64-bit", "m");
+    Mulw = "mulw", R, 0x0200_003b, requires("64-bit", "m");
     /// Divide words, signed.
-    Divw = "divw", requires("64-bit", "m");
+    Divw = "divw", R, 0x0200_403b, requires("64-bit", "m");
     /// Divide words, unsigned.
-    Divuw = "divuw", requires("64-bit", "m");
+    Divuw = "divuw", R, 0x0200_503b, requires("64-bit", "m");
     /// Remainder of words, signed.
-    Remw = "remw", requires("64-bit", "m");
+    Remw = "remw", R, 0x0200_603b, requires("64-bit", "m");
     /// Remainder of words, unsigned.
-    Remuw = "remuw", requires("64-bit", "m");
+    Remuw = "remuw", R, 0x0200_703b, requires("64-bit", "m");
 
     // A
     /// Load a word and reserve its address.
-    LrW = "lr.w", requires("a");
+    LrW = "lr.w", Lr, 0x1000_202f, requires("a");
     /// Store a word if the reservation on its address still holds.
-    ScW = "sc.w", requires("a");
+    ScW = "sc.w", Amo, 0x1800_202f, requires("a");
     /// Atomically swap a word in memory with a register.
-    AmoswapW = "amoswap.w", requires("a");
+    AmoswapW = "amoswap.w", Amo, 0x0800_202f, requires("a");
     /// Atomically add a register to a word in memory.
-    AmoaddW = "amoadd.w", requires("a");
+    AmoaddW = "amoadd.w", Amo, 0x0000_202f, requires("a");
     /// Atomically exclusive-or a register into a word in memory.
-    AmoxorW = "amoxor.w", requires("a");
+    AmoxorW = "amoxor.w", Amo, 0x2000_202f, requires("a");
     /// Atomically and a register into a word in memory.
-    AmoandW = "amoand.w", requires("a");
+    AmoandW = "amoand.w", Amo, 0x6000_202f, requires("a");
     /// Atomically or a register into a word in memory.
-    AmoorW = "amoor.w", requires("a");
+    AmoorW = "amoor.w", Amo, 0x4000_202f, requires("a");
     /// Atomically replace a word in memory with the signed minimum of it and a register.
-    AmominW = "amomin.w", requires("a");
+    AmominW = "amomin.w", Amo, 0x8000_202f, requires("a");
     /// Atomically replace a word in memory with the signed maximum of it and a register.
-    AmomaxW = "amomax.w", requires("a");
+    AmomaxW = "amomax.w", Amo, 0xa000_202f, requires("a");
     /// Atomically replace a word in memory with the unsigned minimum of it and a register.
-    AmominuW = "amominu.w", requires("a");
+    AmominuW = "amominu.w", Amo, 0xc000_202f, requires("a");
     /// Atomically replace a word in memory with the unsigned maximum of it and a register.
-    AmomaxuW = "amomaxu.w", requires("a");
+    AmomaxuW = "amomaxu.w", Amo, 0xe000_202f, requires("a");
 
     // RV64A
     /// Load a doubleword and reserve its address.
-    LrD = "lr.d", requires("64-bit", "a");
+    LrD = "lr.d", Lr, 0x1000_302f, requires("64-bit", "a");
     /// Store a doubleword if the reservation on its address still holds.
-    ScD = "sc.d", requires("64-bit", "a");
+    ScD = "sc.d", Amo, 0x1800_302f, requires("64-bit", "a");
     /// Atomically swap a doubleword in memory with a register.
-    AmoswapD = "amoswap.d", requires("64-bit", "a");
+    AmoswapD = "amoswap.d", Amo, 0x0800_302f, requires("64-bit", "a");
     /// Atomically add a register to a doubleword in memory.
-    AmoaddD = "amoadd.d", requires("64-bit", "a");
+    AmoaddD = "amoadd.d", Amo, 0x0000_302f, requires("64-bit", "a");
     /// Atomically exclusive-or a register into a doubleword in memory.
-    AmoxorD = "amoxor.d", requires("64-bit", "a");
+    AmoxorD = "amoxor.d", Amo, 0x2000_302f, requires("64-bit", "a");
     /// Atomically and a register into a doubleword in memory.
-    AmoandD = "amoand.d", requires("64-bit", "a");
+    AmoandD = "amoand.d", Amo, 0x6000_302f, requires("64-bit", "a");
     /// Atomically or a register into a doubleword in memory.
-    AmoorD = "amoor.d", requires("64-bit", "a");
+    AmoorD = "amoor.d", Amo, 0x4000_302f, requires("64-bit", "a");
     /// Atomically replace a doubleword in memory with the signed minimum of it and a register.
-    AmominD = "amomin.d", requires("64-bit", "a");
+    AmominD = "amomin.d", Amo, 0x8000_302f, requires("64-bit", "a");
     /// Atomically replace a doubleword in memory with the signed maximum of it and a register.
-    AmomaxD = "amomax.d", requires("64-bit", "a");
+    AmomaxD = "amomax.d", Amo, 0xa000_302f, requires("64-bit", "a");
     /// Atomically replace a doubleword in memory with the unsigned minimum of it and a register.
-    AmominuD = "amominu.d", requires("64-bit", "a");
+    AmominuD = "amominu.d", Amo, 0xc000_302f, requires("64-bit", "a");
     /// Atomically replace a doubleword in memory with the unsigned maximum of it and a register.
-    AmomaxuD = "amomaxu.d", requires("64-bit", "a");
+    AmomaxuD = "amomaxu.d", Amo, 0xe000_302f, requires("64-bit", "a");
+}
+
+impl Opcode {
+    /// Returns the opcode with this mnemonic.
+    pub const fn from_mnemonic(mnemonic: &str) -> Option<Self> {
+        let mut i = 0;
+        while i < Self::ALL.len() {
+            if bytes_eq(Self::ALL[i].mnemonic().as_bytes(), mnemonic.as_bytes()) {
+                return Some(Self::ALL[i]);
+            }
+            i += 1;
+        }
+        None
+    }
 }
 
 impl fmt::Display for Opcode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.mnemonic())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn mnemonics_name_their_opcode() {
+        for (discriminant, opcode) in Opcode::ALL.into_iter().enumerate() {
+            assert_eq!(opcode as usize, discriminant);
+            assert_eq!(Opcode::from_mnemonic(opcode.mnemonic()), Some(opcode));
+        }
+        assert_eq!(Opcode::from_mnemonic("addiu"), None);
     }
 }

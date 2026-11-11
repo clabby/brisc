@@ -26,6 +26,18 @@ impl SType {
             imm: (instruction as i32 >> 25 << 5) | bits!(i32, instruction, 7..12),
         }
     }
+
+    /// Encodes the fields as a 32-bit [Word] whose opcode, the low seven bits, is zero.
+    ///
+    /// A field that is too large for its place in the word loses its upper bits.
+    pub const fn encode(&self) -> Word {
+        let imm = self.imm as Word;
+        bits!(Word, imm, 0..5) << 7 |
+            (self.funct3 as Word & 0x7) << 12 |
+            (self.rs1 as Word & 0x1f) << 15 |
+            (self.rs2 as Word & 0x1f) << 20 |
+            bits!(Word, imm, 5..12) << 25
+    }
 }
 
 #[cfg(test)]

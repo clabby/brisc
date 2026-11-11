@@ -25,6 +25,16 @@ impl IType {
             imm: instruction as i32 >> 20,
         }
     }
+
+    /// Encodes the fields as a 32-bit [Word] whose opcode, the low seven bits, is zero.
+    ///
+    /// A field that is too large for its place in the word loses its upper bits.
+    pub const fn encode(&self) -> Word {
+        (self.rd as Word & 0x1f) << 7 |
+            (self.funct3 as Word & 0x7) << 12 |
+            (self.rs1 as Word & 0x1f) << 15 |
+            (self.imm as Word) << 20
+    }
 }
 
 #[cfg(test)]

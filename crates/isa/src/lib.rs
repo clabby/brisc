@@ -15,7 +15,9 @@ mod instructions;
 pub use instructions::*;
 
 mod opcode;
-pub use opcode::Opcode;
+pub use opcode::{Format, Opcode};
+
+pub mod asm;
 
 #[doc(hidden)]
 pub mod legacy;

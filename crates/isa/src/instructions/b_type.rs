@@ -29,6 +29,21 @@ impl BType {
                 (bits!(i32, instruction, 8..12) << 1),
         }
     }
+
+    /// Encodes the fields as a 32-bit [Word] whose opcode, the low seven bits, is zero.
+    ///
+    /// A field that is too large for its place in the word loses its upper bits, and the
+    /// immediate its lowest bit.
+    pub const fn encode(&self) -> Word {
+        let imm = self.imm as Word;
+        bits!(Word, imm, 11..12) << 7 |
+            bits!(Word, imm, 1..5) << 8 |
+            (self.funct3 as Word & 0x7) << 12 |
+            (self.rs1 as Word & 0x1f) << 15 |
+            (self.rs2 as Word & 0x1f) << 20 |
+            bits!(Word, imm, 5..11) << 25 |
+            bits!(Word, imm, 12..13) << 31
+    }
 }
 
 #[cfg(test)]

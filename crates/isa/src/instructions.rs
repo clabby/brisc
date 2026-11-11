@@ -1,6 +1,7 @@
 //! RISC-V instructions and their decoding.
 
-use crate::{InstructionDecodeError, Opcode, Word, X_LEN};
+use crate::{Format, InstructionDecodeError, Opcode, Word, REGISTER_NAMES, X_LEN};
+use core::fmt;
 
 mod b_type;
 pub use b_type::BType;
@@ -356,6 +357,45 @@ impl Instruction {
         Ok(Self { opcode, rd: 0, rs1: 0, rs2: 0, imm: 0, length: 4 })
     }
 
+    /// Encodes the instruction in 32 bits, whatever its [length](Instruction::length).
+    ///
+    /// Returns `None` if the result would not decode to these operands: an operand does not fit
+    /// its field or is not zero although the instruction does not have it, or the crate
+    /// features do not include the instruction.
+    pub const fn encode(&self) -> Option<Word> {
+        let Self { opcode, rd, rs1, rs2, imm, .. } = *self;
+        let operands = match opcode.format() {
+            Format::None => 0,
+            Format::R | Format::Sources => RType { rd, funct3: 0, rs1, rs2, funct7: 0 }.encode(),
+            // The ordering constraints are the low bits of funct7.
+            Format::Lr | Format::Amo => {
+                RType { rd, funct3: 0, rs1, rs2, funct7: imm as u8 }.encode()
+            }
+            Format::I | Format::Load | Format::Csr | Format::CsrI => {
+                IType { rd, funct3: 0, rs1, imm }.encode()
+            }
+            Format::S => SType { funct3: 0, rs1, rs2, imm }.encode(),
+            Format::B => BType { funct3: 0, rs1, rs2, imm }.encode(),
+            Format::U => UType { rd, imm }.encode(),
+            Format::J => JType { rd, imm }.encode(),
+        };
+        let word = opcode.fixed_bits() | operands;
+
+        // Decoding is exact, so it is also the check that every operand survived.
+        match Self::decode(word) {
+            Ok(decoded)
+                if decoded.opcode as u8 == opcode as u8 &&
+                    decoded.rd == rd &&
+                    decoded.rs1 == rs1 &&
+                    decoded.rs2 == rs2 &&
+                    decoded.imm == imm =>
+            {
+                Some(word)
+            }
+            _ => None,
+        }
+    }
+
     const fn from_r(opcode: Opcode, r: RType) -> Self {
         Self { opcode, rd: r.rd, rs1: r.rs1, rs2: r.rs2, imm: 0, length: 4 }
     }
@@ -377,6 +417,34 @@ impl TryFrom<Word> for Instruction {
     }
 }
 
+/// Writes the instruction in assembly language, in the form that [rv!](crate::rv) reads: the
+/// mnemonic and the operands of its [Format], with registers by the names of the standard
+/// calling convention and immediates in decimal.
+impl fmt::Display for Instruction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let Self { opcode, imm, .. } = *self;
+        let [rd, rs1, rs2] = [self.rd, self.rs1, self.rs2]
+            .map(|register| REGISTER_NAMES.get(register as usize).copied().unwrap_or("invalid"));
+        let ordering = ["", ".rl", ".aq", ".aqrl"][(imm & (Self::AQ | Self::RL)) as usize];
+
+        match opcode.format() {
+            Format::None => write!(f, "{opcode}"),
+            Format::R => write!(f, "{opcode} {rd}, {rs1}, {rs2}"),
+            Format::Sources => write!(f, "{opcode} {rs1}, {rs2}"),
+            Format::I => write!(f, "{opcode} {rd}, {rs1}, {imm}"),
+            Format::Load => write!(f, "{opcode} {rd}, {imm}({rs1})"),
+            Format::S => write!(f, "{opcode} {rs2}, {imm}({rs1})"),
+            Format::B => write!(f, "{opcode} {rs1}, {rs2}, {imm}"),
+            Format::U => write!(f, "{opcode} {rd}, {}", imm as u32 >> 12),
+            Format::J => write!(f, "{opcode} {rd}, {imm}"),
+            Format::Lr => write!(f, "{opcode}{ordering} {rd}, ({rs1})"),
+            Format::Amo => write!(f, "{opcode}{ordering} {rd}, {rs2}, ({rs1})"),
+            Format::Csr => write!(f, "{opcode} {rd}, {imm}, {rs1}"),
+            Format::CsrI => write!(f, "{opcode} {rd}, {imm}, {}", self.rs1),
+        }
+    }
+}
+
 const fn invalid_function(q_a: u8, q_b: u8) -> InstructionDecodeError {
     InstructionDecodeError::InvalidFunction { q_a, q_b }
 }
@@ -395,5 +463,66 @@ mod test {
         assert!(Instruction::decode(0b000_00000000_001_00).is_err());
         #[cfg(feature = "c")]
         assert!(Instruction::decode(0b000_00000001_001_00).is_ok());
+    }
+
+    /// Together with the check inside [Instruction::encode], this makes decoding and encoding
+    /// inverses of each other: no two words decode to the same instruction, and decoding
+    /// keeps every bit of a word that is an instruction.
+    #[test]
+    fn encode_inverts_decode_on_every_word() {
+        let threads = std::thread::available_parallelism().map_or(1, usize::from);
+        std::thread::scope(|scope| {
+            for thread in 0..threads {
+                scope.spawn(move || {
+                    // Every word that is not a 16-bit instruction ends in two set bits.
+                    for upper in (thread as Word..=Word::MAX >> 2).step_by(threads) {
+                        let word = upper << 2 | 0b11;
+                        if let Ok(instruction) = Instruction::decode(word) {
+                            assert_eq!(instruction.length, 4);
+                            assert_eq!(instruction.encode(), Some(word), "{word:#010x}");
+                        }
+                    }
+                });
+            }
+        });
+    }
+
+    #[test]
+    fn exactly_the_supported_opcodes_encode() {
+        for opcode in Opcode::ALL {
+            let instruction = Instruction { opcode, rd: 0, rs1: 0, rs2: 0, imm: 0, length: 4 };
+            let word = instruction.encode();
+            assert_eq!(word.is_some(), opcode.is_supported(), "{opcode}");
+            if let Some(word) = word {
+                assert_eq!(Instruction::decode(word), Ok(instruction));
+            }
+        }
+    }
+
+    #[test]
+    fn operands_that_do_not_fit_do_not_encode() {
+        let addi =
+            Instruction { opcode: Opcode::Addi, rd: 1, rs1: 2, rs2: 0, imm: 2047, length: 4 };
+        assert!(addi.encode().is_some());
+        assert_eq!(Instruction { imm: 2048, ..addi }.encode(), None);
+        assert_eq!(Instruction { rd: 32, ..addi }.encode(), None);
+        assert_eq!(Instruction { rs2: 1, ..addi }.encode(), None);
+
+        let beq = Instruction { opcode: Opcode::Beq, rd: 0, rs1: 1, rs2: 2, imm: -4096, length: 4 };
+        assert!(beq.encode().is_some());
+        assert_eq!(Instruction { imm: 3, ..beq }.encode(), None);
+        assert_eq!(Instruction { imm: 4096, ..beq }.encode(), None);
+    }
+
+    #[test]
+    fn display_writes_assembly() {
+        let text = |word| Instruction::decode(word).unwrap().to_string();
+        assert_eq!(text(crate::rv!(addi a0, zero, -5)), "addi a0, zero, -5");
+        assert_eq!(text(crate::rv!(sw s1, 12(sp))), "sw s1, 12(sp)");
+        assert_eq!(text(crate::rv!(lui t0, 0xfffff)), "lui t0, 1048575");
+        assert_eq!(text(crate::rv!(csrrwi x5, 0x340, 31)), "csrrwi t0, 832, 31");
+        assert_eq!(text(crate::rv!(ecall)), "ecall");
+        #[cfg(feature = "a")]
+        assert_eq!(text(crate::rv!(sc.w.rl a0, a2, (a1))), "sc.w.rl a0, a2, (a1)");
     }
 }
