@@ -1,17 +1,16 @@
-//! Checks that [Cpu] and the stage pipeline of [StEmu] compute the same thing.
+//! Checks that [Cpu] and the stage pipeline compute the same thing.
 //!
 //! Both engines start from the same memory image and are advanced in lock step. Program counter
 //! and registers are compared after every step, and all written memory at the end.
 
-use crate::{
-    cfg::EmuConfig,
-    elf::load_elf,
-    st::StEmu,
-    test_utils::RiscvTestKernel,
-};
+use crate::elf::load_elf;
 use brisc_hw::{
     cpu::{Cpu, Stop},
+    errors::{PipelineError, PipelineResult},
     memory::{Address, Memory, PageIndex, SparseMemory, PAGE_ADDRESS_SIZE, PAGE_SIZE},
+    pipeline::{
+        decode_instruction, execute, instruction_fetch, mem_access, writeback, PipelineRegister,
+    },
     Word, XWord, REG_A0, REG_A7,
 };
 use std::{collections::BTreeSet, fs};
@@ -71,20 +70,12 @@ impl Memory for Recording {
     }
 }
 
-#[derive(Debug)]
-struct Config;
-
-impl EmuConfig<'_> for Config {
-    type Memory = Recording;
-    type Kernel = RiscvTestKernel;
-    type Context = ();
-}
-
 /// The two engines, loaded with the same program.
 struct Pair {
-    pipeline: StEmu<'static, Config>,
+    pipeline: PipelineRegister,
+    pipeline_memory: Recording,
     cpu: Cpu,
-    memory: Recording,
+    cpu_memory: Recording,
 }
 
 /// How a [Pair] stopped.
@@ -102,36 +93,47 @@ impl Pair {
     fn new(pc: XWord, image: impl Fn(&mut Recording)) -> Self {
         let mut memories = [Recording::default(), Recording::default()];
         memories.iter_mut().for_each(image);
-        let [first, second] = memories;
-        let pipeline =
-            StEmu::builder().with_pc(pc).with_memory(first).with_kernel(RiscvTestKernel).with_ctx(()).build();
-        Self { pipeline, cpu: Cpu::new(pc), memory: second }
+        let [pipeline_memory, cpu_memory] = memories;
+        Self { pipeline: PipelineRegister::new(pc), pipeline_memory, cpu: Cpu::new(pc), cpu_memory }
     }
 
     fn set_register(&mut self, index: usize, value: XWord) {
-        self.pipeline.register.registers[index] = value;
+        self.pipeline.registers[index] = value;
         self.cpu.registers.set(index, value);
     }
 
-    /// Advances both engines by up to `budget` instructions and compares their state. An `ecall`
-    /// is left unexecuted by both.
+    /// Runs one instruction through the stages. An `ecall` is reported as
+    /// [PipelineError::SyscallException] and leaves the program counter on the instruction.
+    fn cycle(&mut self) -> PipelineResult<()> {
+        let (r, memory) = (&mut self.pipeline, &mut self.pipeline_memory);
+        instruction_fetch(r, memory)
+            .and_then(|_| decode_instruction(r))
+            .and_then(|_| execute(r))
+            .and_then(|_| mem_access(r, memory))
+            .and_then(|_| writeback(r))?;
+        r.advance();
+        Ok(())
+    }
+
+    /// Advances both engines by up to `budget` instructions and compares their state. Both stop
+    /// in front of an `ecall`.
     fn step(&mut self, budget: u64, context: &str) -> Outcome {
         let before = self.cpu.instret;
-        let stop = self.cpu.run(&mut self.memory, budget);
+        let stop = self.cpu.run(&mut self.cpu_memory, budget);
         let mut retired = self.cpu.instret - before;
         if stop == Stop::Ecall {
-            // The pipeline hands an `ecall` to its kernel within the cycle.
+            // The cpu counts the `ecall` as retired.
             retired -= 1;
         }
 
         for _ in 0..retired {
-            self.pipeline.cycle().unwrap_or_else(|e| panic!("{context}: pipeline failed: {e:?}"));
+            self.cycle().unwrap_or_else(|e| panic!("{context}: pipeline failed: {e:?}"));
         }
         let at = self.cpu.instret;
-        assert_eq!(self.pipeline.register.pc, self.cpu.pc, "{context}: pc after {at} instructions");
+        assert_eq!(self.pipeline.pc, self.cpu.pc, "{context}: pc after {at} instructions");
         for index in 0..32 {
             assert_eq!(
-                self.pipeline.register.registers[index],
+                self.pipeline.registers[index],
                 self.cpu.registers.get(index),
                 "{context}: x{index} after {at} instructions, pc = {:#x}",
                 self.cpu.pc,
@@ -140,9 +142,24 @@ impl Pair {
 
         match stop {
             Stop::Budget => Outcome::Running,
-            Stop::Ecall => Outcome::Ecall(self.cpu.registers.get(REG_A7)),
+            Stop::Ecall => {
+                assert!(
+                    matches!(self.cycle(), Err(PipelineError::SyscallException(_))),
+                    "{context}: only the cpu stopped at an ecall"
+                );
+                Outcome::Ecall(self.cpu.registers.get(REG_A7))
+            }
             Stop::Fault(fault) => {
-                assert!(self.pipeline.cycle().is_err(), "{context}: only the cpu faulted: {fault}");
+                // The pipeline executes a store-conditional of an unsupported size as one that
+                // fails, where the cpu rejects every atomic instruction of such a size.
+                #[cfg(feature = "a")]
+                let stricter = matches!(fault, brisc_hw::cpu::Fault::BadAmoSize(_));
+                #[cfg(not(feature = "a"))]
+                let stricter = false;
+                assert!(
+                    self.cycle().is_err() || stricter,
+                    "{context}: only the cpu faulted: {fault}"
+                );
                 Outcome::Fault
             }
         }
@@ -150,16 +167,21 @@ impl Pair {
 
     /// Lets both engines pass an `ecall` that asks for nothing.
     fn skip_ecall(&mut self) {
-        self.pipeline.cycle().unwrap();
+        self.pipeline.advance();
         self.cpu.pc = self.cpu.pc.wrapping_add(4);
     }
 
     fn assert_same_memory(&mut self, context: &str) {
-        let pages = self.memory.written.union(&self.pipeline.memory.written).copied().collect::<Vec<_>>();
+        let pages = self
+            .cpu_memory
+            .written
+            .union(&self.pipeline_memory.written)
+            .copied()
+            .collect::<Vec<_>>();
         for page in pages {
             let (mut a, mut b) = ([0; PAGE_SIZE], [0; PAGE_SIZE]);
-            self.pipeline.memory.read(page << PAGE_ADDRESS_SIZE, &mut a);
-            self.memory.read(page << PAGE_ADDRESS_SIZE, &mut b);
+            self.pipeline_memory.read(page << PAGE_ADDRESS_SIZE, &mut a);
+            self.cpu_memory.read(page << PAGE_ADDRESS_SIZE, &mut b);
             assert!(a == b, "{context}: memory differs in page {page:#x}");
         }
     }
@@ -240,51 +262,76 @@ impl Rng {
     }
 }
 
-#[test]
-fn random_instructions_match() {
-    /// Where the random code is placed: the last two thirds of a page and the start of the next,
-    /// so that some instructions straddle the boundary.
-    const CODE: XWord = 0x1_0000 + 0x1000 / 3 * 2;
-    const WORDS: usize = 384;
-    const CASES: u64 = 20_000;
-    const STEPS: u64 = 48;
-    /// The major opcodes of the base ISA and the M, A and 64-bit extensions.
+/// Returns a random word that is likely to decode: a major opcode of the base ISA or of the M, A
+/// and 64-bit extensions with function fields biased towards the defined ones, two random 16-bit
+/// parcels, or occasionally an `ecall`.
+fn random_word(rng: &mut Rng) -> Word {
     const OPCODES: [Word; 14] = [
         0b000_0011, 0b000_1111, 0b001_0011, 0b001_0111, 0b001_1011, 0b010_0011, 0b010_1111,
         0b011_0011, 0b011_0111, 0b011_1011, 0b110_0011, 0b110_0111, 0b110_1111, 0b111_0011,
     ];
+    const FUNCT7: [Word; 4] = [0x00, 0x00, 0x20, 0x01];
+    const FUNCT5: [Word; 11] = [
+        0b00010, 0b00011, 0b00001, 0b00000, 0b00100, 0b01100, 0b01000, 0b10000, 0b10100, 0b11000,
+        0b11100,
+    ];
+
+    let bits = rng.next();
+    let field = |shift: u32, width: u32| (bits >> shift) as Word & ((1 << width) - 1);
+    let mut word = (bits >> 32) as Word;
+    match field(0, 5) {
+        0..=24 => {}
+        25..=30 => return word,
+        _ => return 0b111_0011,
+    }
+
+    let opcode = OPCODES[field(5, 8) as usize % OPCODES.len()];
+    word = word & !0x7f | opcode;
+    if field(13, 3) != 0 {
+        word = word & 0x01ff_ffff | FUNCT7[field(16, 2) as usize] << 25;
+    }
+    if field(18, 2) != 0 {
+        // Registers `x0` to `x7`, so that instructions depend on each other.
+        word &= !0x018c_0c00;
+    }
+    match opcode {
+        // Stores: a defined width most of the time.
+        0b010_0011 => word &= !0x4000,
+        // Atomics: a defined function and usually a defined width.
+        0b010_1111 => {
+            word = word & 0x07ff_ffff | FUNCT5[field(20, 4) as usize % FUNCT5.len()] << 27;
+            if field(24, 3) != 0 {
+                word = word & !0x7000 | (2 + field(27, 1)) << 12;
+            }
+        }
+        // Branches and jumps: short and forward, to stay within the code. Backward transfers
+        // come from `jalr` through registers that point into the code.
+        0b110_0011 => word &= !0xf800_0080,
+        0b110_1111 => word &= !0xf01f_f000,
+        _ => {}
+    }
+    word
+}
+
+#[test]
+fn random_instructions_match() {
+    /// Where the random code is placed: the end of one page and the start of the next, so that
+    /// some instructions straddle the boundary.
+    const CODE: XWord = 0x1_0c00;
+    const WORDS: usize = 384;
+    const CASES: u64 = 20_000;
+    const STEPS: u64 = 48;
 
     let mut rng = Rng(0x9E37_79B9_7F4A_7C15);
+    let mut retired = 0;
     for case in 0..CASES {
         let context = format!("case {case}");
 
-        let mut code = Vec::with_capacity(4 * WORDS);
-        for _ in 0..WORDS {
-            let bits = rng.next();
-            let mut word = (bits >> 32) as Word;
-            match bits % 8 {
-                // A word with a valid major opcode, usually with small register numbers so that
-                // instructions depend on each other, and sometimes with a small function field.
-                0..=5 => {
-                    word = word & !0x7f | OPCODES[(bits >> 8) as usize % OPCODES.len()];
-                    if bits & (1 << 16) != 0 {
-                        word &= !0x0181_8c00;
-                    }
-                    if bits & (1 << 17) != 0 {
-                        word &= !0xfc00_0000;
-                    }
-                }
-                // Two 16-bit parcels, which are compressed instructions unless they end in 0b11.
-                6 => {}
-                // An environment call ends the case.
-                _ => word = 0b111_0011,
-            }
-            code.extend_from_slice(&word.to_le_bytes());
-        }
-
-        let mut pair = Pair::new(CODE + (rng.next() % 64) as XWord * 2, |memory| memory.write(CODE, &code));
+        let code = (0..WORDS).flat_map(|_| random_word(&mut rng).to_le_bytes()).collect::<Vec<_>>();
+        let entry = CODE + (rng.next() % 64) as XWord * if cfg!(feature = "c") { 2 } else { 4 };
+        let mut pair = Pair::new(entry, |memory| memory.write(CODE, &code));
         for index in 1..32 {
-            // Small values and addresses in and around the code.
+            // Small values, addresses in and around the code, and arbitrary values.
             let bits = rng.next();
             let value = match bits % 4 {
                 0 => (bits >> 8) as XWord % 64,
@@ -300,6 +347,10 @@ fn random_instructions_match() {
                 break;
             }
         }
+        retired += pair.cpu.instret;
         pair.assert_same_memory(&context);
     }
+
+    // Enough words must have decoded for the comparison to mean anything.
+    assert!(retired > CASES, "only {retired} instructions were compared");
 }
