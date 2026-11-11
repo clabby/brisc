@@ -8,7 +8,6 @@
 extern crate alloc;
 
 pub mod cpu;
-pub mod kernel;
 pub mod memory;
 
 // Re-export the ISA types.

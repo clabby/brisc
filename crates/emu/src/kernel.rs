@@ -4,11 +4,10 @@
 //! system call, and whoever drives the processor hands the guest's registers and memory to a
 //! [Kernel] or an [AsyncKernel] before running it again.
 //!
-//! [Cpu::run]: crate::cpu::Cpu::run
-//! [Stop::Ecall]: crate::cpu::Stop::Ecall
+//! [Cpu::run]: brisc_hw::cpu::Cpu::run
+//! [Stop::Ecall]: brisc_hw::cpu::Stop::Ecall
 
-use crate::{cpu::Registers, memory::Memory};
-use brisc_isa::XWord;
+use brisc_hw::{cpu::Registers, memory::Memory, XWord};
 use core::future::{ready, Future};
 
 /// What the guest does after a system call.

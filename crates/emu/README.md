@@ -17,10 +17,13 @@ following features:
 ## Usage
 
 ```rust
-use brisc_emu::{cfg::EmuConfig, st::StEmu};
+use brisc_emu::{
+    cfg::EmuConfig,
+    kernel::{Kernel, Syscall},
+    st::StEmu,
+};
 use brisc_hw::{
     cpu::Registers,
-    kernel::{Kernel, Syscall},
     memory::{Memory, SparseMemory},
     XWord, REG_A0, REG_A1, REG_A2,
 };

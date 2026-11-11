@@ -9,6 +9,7 @@ extern crate alloc;
 
 pub mod cfg;
 pub mod elf;
+pub mod kernel;
 pub mod st;
 
 #[cfg(any(test, feature = "test-utils"))]

@@ -1,9 +1,8 @@
 # `brisc-hw`
 
-This crate contains the hardware of a RISC-V hart: the processor (`cpu`), the guest memory it
-executes from (`memory`), and the interface to the kernel that services its system calls
-(`kernel`). For convenience and portability, the crate is `no_std` w/ `alloc` requirements with no
-default features enabled.
+This crate contains the hardware of a RISC-V hart: the processor (`cpu`) and the guest memory it
+executes from (`memory`). For convenience and portability, the crate is `no_std` w/ `alloc`
+requirements with no default features enabled.
 
 The processor decodes each instruction once and caches the decoded form per page of guest memory.
 Writes to a page drop its decoded instructions, so self-modifying code works without `fence.i`.

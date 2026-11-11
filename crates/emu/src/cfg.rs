@@ -1,6 +1,7 @@
 //! Emulator type configuration trait
 
-use brisc_hw::{kernel::AsyncKernel, memory::Memory};
+use crate::kernel::AsyncKernel;
+use brisc_hw::memory::Memory;
 
 /// The [`EmuConfig`] trait defines the type configuration for the emulator.
 ///
@@ -14,7 +15,7 @@ pub trait EmuConfig<'ctx> {
     ///
     /// Every [Kernel] qualifies, because it is also an [AsyncKernel].
     ///
-    /// [Kernel]: brisc_hw::kernel::Kernel
+    /// [Kernel]: crate::kernel::Kernel
     type Kernel: AsyncKernel<Self::Context> + 'ctx;
 
     /// The external state passed to the kernel.

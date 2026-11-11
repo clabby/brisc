@@ -1,9 +1,11 @@
 //! Single-threaded emulator.
 
-use crate::cfg::EmuConfig;
+use crate::{
+    cfg::EmuConfig,
+    kernel::{AsyncKernel, Kernel, Syscall},
+};
 use brisc_hw::{
     cpu::{Cpu, Fault, Stop},
-    kernel::{AsyncKernel, Kernel, Syscall},
     XWord, REG_A7,
 };
 use thiserror::Error;

@@ -1,9 +1,12 @@
 //! Test utilities for the emulator crate.
 
-use crate::{cfg::EmuConfig, st::StEmu};
+use crate::{
+    cfg::EmuConfig,
+    kernel::{AsyncKernel, Kernel, Syscall},
+    st::StEmu,
+};
 use brisc_hw::{
     cpu::{Registers, Stop},
-    kernel::{AsyncKernel, Kernel, Syscall},
     memory::{Memory, SparseMemory},
     XWord, REG_A0, REG_A1, REG_A2, REG_A7,
 };
