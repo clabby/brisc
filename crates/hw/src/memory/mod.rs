@@ -1,51 +1,58 @@
-//! Simple memory implementation for the `brisc-hw` crate.
+//! Guest memory.
 
-use hashbrown::HashMap;
+use brisc_isa::XWord;
 
-mod interface;
-pub use interface::{Address, Memory};
+mod sparse;
+pub use sparse::SparseMemory;
 
-mod errors;
-pub use errors::{MemoryError, MemoryResult};
+/// A guest memory address.
+pub type Address = XWord;
 
-mod page;
-pub use page::{Page, PageIndex, EMPTY_PAGE, PAGE_ADDRESS_MASK, PAGE_ADDRESS_SIZE, PAGE_SIZE};
+/// The index of a page: an [Address] with the offset within the page shifted out.
+pub type PageIndex = XWord;
 
-/// A simple memory implementation that uses a [`HashMap`] to store pages sparsely.
-#[derive(Debug, Clone, Default)]
-pub struct SimpleMemory(HashMap<PageIndex, Page>);
+/// The number of [Address] bits that select a byte within a page.
+pub const PAGE_ADDRESS_SIZE: usize = 12;
 
-impl SimpleMemory {
-    /// Create a new empty `SimpleMemory`.
-    pub fn new() -> Self {
-        Self::default()
-    }
+/// The size of a page in bytes (4 KiB).
+pub const PAGE_SIZE: usize = 1 << PAGE_ADDRESS_SIZE;
 
-    /// Return a reference to the underlying `HashMap`.
-    const fn inner(&self) -> &HashMap<PageIndex, Page> {
-        &self.0
-    }
+/// The mask to apply to an [Address] to obtain the offset within its page.
+pub const PAGE_ADDRESS_MASK: usize = PAGE_SIZE - 1;
 
-    /// Return a mutable reference to the underlying `HashMap`.
-    const fn inner_mut(&mut self) -> &mut HashMap<PageIndex, Page> {
-        &mut self.0
-    }
-}
+/// The guest's address space.
+///
+/// Every address is readable and writable. Memory that was never written reads as zero, and
+/// reading it does not map a page. Accesses may have any alignment and may cross page boundaries;
+/// addresses wrap around at the end of the address space.
+///
+/// A memory also tells the processor when the guest overwrites code. The processor calls
+/// [Memory::watch] for every page it has decoded instructions from, and learns about later
+/// writes to those pages from [Memory::store] and [Memory::pop_dirty].
+pub trait Memory {
+    /// Reads `N` little-endian bytes starting at `address`.
+    fn load<const N: usize>(&mut self, address: Address) -> [u8; N];
 
-impl Memory for SimpleMemory {
-    fn page_count(&self) -> usize {
-        self.inner().len()
-    }
+    /// Writes `N` bytes starting at `address`.
+    ///
+    /// Returns `true` if the write touched a watched page.
+    fn store<const N: usize>(&mut self, address: Address, bytes: [u8; N]) -> bool;
 
-    fn alloc(&mut self, page_index: PageIndex) -> MemoryResult<&mut Page> {
-        Ok(self.inner_mut().entry(page_index).or_insert_with(|| EMPTY_PAGE))
-    }
+    /// Fills `buf` with the bytes starting at `address`.
+    fn read(&mut self, address: Address, buf: &mut [u8]);
 
-    fn page(&self, page_index: PageIndex) -> Option<&Page> {
-        self.inner().get(&page_index)
-    }
+    /// Writes `data` starting at `address`.
+    fn write(&mut self, address: Address, data: &[u8]);
 
-    fn page_mut(&mut self, page_index: PageIndex) -> Option<&mut Page> {
-        self.inner_mut().get_mut(&page_index)
-    }
+    /// Starts watching `page` for writes.
+    ///
+    /// The first write to a watched page ends the watch and queues the page for
+    /// [Memory::pop_dirty].
+    fn watch(&mut self, page: PageIndex);
+
+    /// Removes and returns a page that was written while it was watched.
+    fn pop_dirty(&mut self) -> Option<PageIndex>;
+
+    /// Returns the number of pages that have been written to or watched.
+    fn page_count(&self) -> usize;
 }

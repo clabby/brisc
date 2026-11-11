@@ -73,7 +73,7 @@ where
         let r = &mut self.register;
 
         // Execute all pipeline stages sequentially.
-        let cycle_res = instruction_fetch(r, &self.memory)
+        let cycle_res = instruction_fetch(r, &mut self.memory)
             .and_then(|_| decode_instruction(r))
             .and_then(|_| execute(r))
             .and_then(|_| mem_access(r, &mut self.memory))
@@ -116,7 +116,7 @@ where
         let r = &mut self.register;
 
         // Execute all pipeline stages sequentially.
-        let cycle_res = instruction_fetch(r, &self.memory)
+        let cycle_res = instruction_fetch(r, &mut self.memory)
             .and_then(|_| decode_instruction(r))
             .and_then(|_| execute(r))
             .and_then(|_| mem_access(r, &mut self.memory))

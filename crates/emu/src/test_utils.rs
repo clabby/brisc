@@ -3,7 +3,7 @@
 use crate::{cfg::EmuConfig, st::StEmu};
 use brisc_hw::{
     kernel::Kernel,
-    memory::{Memory, SimpleMemory},
+    memory::{Memory, SparseMemory},
     pipeline::PipelineRegister,
     XWord, REG_A0, REG_A1, REG_A2,
 };
@@ -90,7 +90,7 @@ pub fn run_riscv_test(test_path: &PathBuf) -> u64 {
 struct TestStEmuConfig;
 
 impl EmuConfig<'_> for TestStEmuConfig {
-    type Memory = SimpleMemory;
+    type Memory = SparseMemory;
 
     type Kernel = RiscvTestKernel;
 
@@ -121,7 +121,8 @@ impl Kernel<()> for RiscvTestKernel {
                 let ptr = p_reg.registers[REG_A1];
                 let len = p_reg.registers[REG_A2];
 
-                let raw_msg = mem.read_memory_range(ptr, len).unwrap();
+                let mut raw_msg = vec![0; len as usize];
+                mem.read(ptr, &mut raw_msg);
                 let msg = String::from_utf8_lossy(&raw_msg);
 
                 if fd == 1 {

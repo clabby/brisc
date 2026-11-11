@@ -9,7 +9,7 @@ use brisc_isa::{
     sign_extend, Byte, HalfWord, Instruction, LoadFunction, StoreFunction, Word, XWord,
 };
 
-#[cfg(feature = "64-bit")]
+#[cfg(any(feature = "64-bit", feature = "a"))]
 use brisc_isa::DoubleWord;
 
 #[cfg(feature = "a")]
@@ -24,36 +24,24 @@ pub fn mem_access<M: Memory>(p_reg: &mut PipelineRegister, memory: &mut M) -> Pi
         Instruction::MemoryLoad(_, funct) => {
             // Load the value from memory.
             let value = match funct {
-                LoadFunction::Lb => sign_extend(
-                    memory.get_byte(effective_address).map_err(PipelineError::MemoryError)?
-                        as XWord,
-                    7,
-                ),
-                LoadFunction::Lbu => {
-                    memory.get_byte(effective_address).map_err(PipelineError::MemoryError)? as XWord
+                LoadFunction::Lb => {
+                    sign_extend(Byte::from_le_bytes(memory.load(effective_address)) as XWord, 7)
                 }
+                LoadFunction::Lbu => Byte::from_le_bytes(memory.load(effective_address)) as XWord,
                 LoadFunction::Lh => sign_extend(
-                    memory.get_halfword(effective_address).map_err(PipelineError::MemoryError)?
-                        as XWord,
+                    HalfWord::from_le_bytes(memory.load(effective_address)) as XWord,
                     15,
                 ),
                 LoadFunction::Lhu => {
-                    memory.get_halfword(effective_address).map_err(PipelineError::MemoryError)?
-                        as XWord
+                    HalfWord::from_le_bytes(memory.load(effective_address)) as XWord
                 }
-                LoadFunction::Lw => sign_extend(
-                    memory.get_word(effective_address).map_err(PipelineError::MemoryError)?
-                        as XWord,
-                    31,
-                ),
-                #[cfg(feature = "64-bit")]
-                LoadFunction::Lwu => {
-                    memory.get_word(effective_address).map_err(PipelineError::MemoryError)? as XWord
+                LoadFunction::Lw => {
+                    sign_extend(Word::from_le_bytes(memory.load(effective_address)) as XWord, 31)
                 }
                 #[cfg(feature = "64-bit")]
-                LoadFunction::Ld => {
-                    memory.get_doubleword(effective_address).map_err(PipelineError::MemoryError)?
-                }
+                LoadFunction::Lwu => Word::from_le_bytes(memory.load(effective_address)) as XWord,
+                #[cfg(feature = "64-bit")]
+                LoadFunction::Ld => DoubleWord::from_le_bytes(memory.load(effective_address)),
             };
             p_reg.memory = Some(value);
         }
@@ -62,25 +50,17 @@ pub fn mem_access<M: Memory>(p_reg: &mut PipelineRegister, memory: &mut M) -> Pi
             let value = p_reg.rs2_value.ok_or(PipelineError::MissingState("rs2_value"))?;
             match funct {
                 StoreFunction::Sb => {
-                    memory
-                        .set_byte(effective_address, value as Byte)
-                        .map_err(PipelineError::MemoryError)?;
+                    memory.store(effective_address, (value as Byte).to_le_bytes());
                 }
                 StoreFunction::Sh => {
-                    memory
-                        .set_halfword(effective_address, value as HalfWord)
-                        .map_err(PipelineError::MemoryError)?;
+                    memory.store(effective_address, (value as HalfWord).to_le_bytes());
                 }
                 StoreFunction::Sw => {
-                    memory
-                        .set_word(effective_address, value as Word)
-                        .map_err(PipelineError::MemoryError)?;
+                    memory.store(effective_address, (value as Word).to_le_bytes());
                 }
                 #[cfg(feature = "64-bit")]
                 StoreFunction::Sd => {
-                    memory
-                        .set_doubleword(effective_address, value as DoubleWord)
-                        .map_err(PipelineError::MemoryError)?;
+                    memory.store(effective_address, (value as DoubleWord).to_le_bytes());
                 }
             }
         }
@@ -100,9 +80,9 @@ pub fn mem_access<M: Memory>(p_reg: &mut PipelineRegister, memory: &mut M) -> Pi
             match funct {
                 AmoFunction::Lr => {
                     let value = match size {
-                        4 => memory.get_word(addr).map_err(PipelineError::MemoryError)? as XWord,
+                        4 => Word::from_le_bytes(memory.load(addr)) as XWord,
                         #[cfg(feature = "64-bit")]
-                        8 => memory.get_doubleword(addr).map_err(PipelineError::MemoryError)?,
+                        8 => DoubleWord::from_le_bytes(memory.load(addr)),
                         _ => return Err(PipelineError::BadAmoSize(size)),
                     };
                     p_reg.memory = Some(value);
@@ -116,15 +96,11 @@ pub fn mem_access<M: Memory>(p_reg: &mut PipelineRegister, memory: &mut M) -> Pi
                                 p_reg.rs2_value.ok_or(PipelineError::MissingState("rs2_value"))?;
 
                             match size {
-                                4 => memory
-                                    .set_word(addr, rs2 as Word)
-                                    .map_err(PipelineError::MemoryError)?,
+                                4 => memory.store(addr, (rs2 as Word).to_le_bytes()),
                                 #[cfg(feature = "64-bit")]
-                                8 => memory
-                                    .set_doubleword(addr, rs2)
-                                    .map_err(PipelineError::MemoryError)?,
+                                8 => memory.store(addr, rs2.to_le_bytes()),
                                 _ => return Err(PipelineError::BadAmoSize(size)),
-                            }
+                            };
 
                             p_reg.memory = Some(0);
                         }
@@ -137,9 +113,9 @@ pub fn mem_access<M: Memory>(p_reg: &mut PipelineRegister, memory: &mut M) -> Pi
                         p_reg.rs2_value.ok_or(PipelineError::MissingState("rs2_value"))?;
 
                     let mut mem = match size {
-                        4 => memory.get_word(addr).map_err(PipelineError::MemoryError)? as XWord,
+                        4 => Word::from_le_bytes(memory.load(addr)) as XWord,
                         #[cfg(feature = "64-bit")]
-                        8 => memory.get_doubleword(addr).map_err(PipelineError::MemoryError)?,
+                        8 => DoubleWord::from_le_bytes(memory.load(addr)),
                         _ => return Err(PipelineError::BadAmoSize(size)),
                     };
 
@@ -165,11 +141,9 @@ pub fn mem_access<M: Memory>(p_reg: &mut PipelineRegister, memory: &mut M) -> Pi
                     };
 
                     if size == 4 {
-                        memory.set_word(addr, mem as Word).map_err(PipelineError::MemoryError)?;
+                        memory.store(addr, (mem as Word).to_le_bytes());
                     } else {
-                        memory
-                            .set_doubleword(addr, mem as brisc_isa::DoubleWord)
-                            .map_err(PipelineError::MemoryError)?;
+                        memory.store(addr, (mem as DoubleWord).to_le_bytes());
                     }
                 }
             }

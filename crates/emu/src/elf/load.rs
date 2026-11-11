@@ -1,9 +1,6 @@
 //! ELF file loading utilities.
 
-use alloc::{
-    format,
-    string::{String, ToString},
-};
+use alloc::{format, string::String};
 use brisc_hw::{
     memory::{Address, Memory},
     XWord,
@@ -34,14 +31,9 @@ where
 
         let segment_data =
             elf.segment_data(&header).map_err(|e| format!("Failed to fetch section data: {e}"))?;
-        let section_data = &segment_data[..header.p_filesz as usize];
-        let mut data = section_data.to_vec();
-
         if header.p_filesz != header.p_memsz {
             if header.p_type == PT_LOAD {
-                if header.p_filesz < header.p_memsz {
-                    data.resize(data.len() + (header.p_memsz - header.p_filesz) as usize, 0);
-                } else {
+                if header.p_filesz > header.p_memsz {
                     return Err(format!(
                         "Invalid PT_LOAD program segment {}, file size ({}) > mem size ({})",
                         i, header.p_filesz, header.p_memsz
@@ -67,9 +59,9 @@ where
             ));
         }
 
-        memory
-            .set_memory_range(header.p_vaddr as Address, &mut data.as_slice())
-            .map_err(|e| e.to_string())?;
+        // Only the bytes present in the file are written. The rest of the segment is left
+        // unmapped, which reads as zero.
+        memory.write(header.p_vaddr as Address, &segment_data[..header.p_filesz as usize]);
     }
 
     Ok((memory, elf.ehdr.e_entry as XWord))

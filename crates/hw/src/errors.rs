@@ -1,6 +1,5 @@
 //! Errors for the `brisc-hw` crate.
 
-use crate::memory::MemoryError;
 use brisc_isa::{InstructionDecodeError, XWord};
 use thiserror::Error;
 
@@ -13,9 +12,6 @@ pub enum PipelineError {
     /// An error occurred while decoding an instruction.
     #[error(transparent)]
     InstructionDecodeError(#[from] InstructionDecodeError),
-    /// An error occurred in the memory bus.
-    #[error("{0}")]
-    MemoryError(MemoryError),
     /// A syscall exception occurred.
     #[error("Syscall exception occurred. Syscall number: {0}")]
     SyscallException(XWord),

@@ -1,19 +1,17 @@
 //! The Instruction Fetch pipeline stage.
 
 use super::register::PipelineRegister;
-use crate::{
-    errors::{PipelineError, PipelineResult},
-    memory::Memory,
-};
+use crate::{errors::PipelineResult, memory::Memory};
+use brisc_isa::Word;
 use cfg_if::cfg_if;
 
 /// Execute the Instruction Fetch pipeline stage.
 pub fn instruction_fetch<M: Memory>(
     p_reg: &mut PipelineRegister,
-    memory: &M,
+    memory: &mut M,
 ) -> PipelineResult<()> {
     // Fetch the instruction from memory at the current program counter.
-    let instr_raw = memory.get_word(p_reg.pc).map_err(PipelineError::MemoryError)?;
+    let instr_raw = Word::from_le_bytes(memory.load(p_reg.pc));
     p_reg.instruction_raw = Some(instr_raw);
 
     // Increment the program counter eagerly. If a branch is taken, the program counter
