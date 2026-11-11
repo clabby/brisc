@@ -36,7 +36,7 @@ unusual_byte_groupings = "allow"
 # Local
 brisc-isa = { path = "crates/isa", default-features = false }
 brisc-hw = { path = "crates/hw", default-features = false }
-brisc-emu = { path = "crates/hw", default-features = false }
+brisc-emu = { path = "crates/emu", default-features = false }
 
 # External
 cfg-if = "1.0.0"
