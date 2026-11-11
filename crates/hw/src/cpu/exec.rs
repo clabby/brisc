@@ -18,15 +18,7 @@ use crate::memory::Address;
 use brisc_isa::AmoFunction;
 
 #[cfg(feature = "m")]
-use brisc_isa::{DoubleXWord, X_LEN};
-
-/// The signed counterpart of [DoubleXWord].
-#[cfg(all(feature = "m", feature = "64-bit"))]
-type SDoubleXWord = i128;
-
-/// The signed counterpart of [DoubleXWord].
-#[cfg(all(feature = "m", not(feature = "64-bit")))]
-type SDoubleXWord = i64;
+use brisc_isa::{DoubleXWord, SDoubleXWord, X_LEN};
 
 /// Why [execute] returned.
 pub(super) enum Exit {

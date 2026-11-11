@@ -49,6 +49,9 @@ cfg_if! {
         /// A type alias for a signed value that is the width of the architecture's word (64-bit).
         pub type SXWord = i64;
 
+        /// A type alias for a signed value that is double the width of the architecture's word (128-bit).
+        pub type SDoubleXWord = i128;
+
         /// An atomic type of size [X_LEN].
         pub type AtomicXWord = core::sync::atomic::AtomicU64;
     } else {
@@ -66,6 +69,9 @@ cfg_if! {
 
         /// A type alias for a signed value that is the width of the architecture's word (32-bit).
         pub type SXWord = i32;
+
+        /// A type alias for a signed value that is double the width of the architecture's word (64-bit).
+        pub type SDoubleXWord = i64;
 
         /// An atomic type of size [X_LEN].
         pub type AtomicXWord = core::sync::atomic::AtomicU32;
