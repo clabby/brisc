@@ -5,7 +5,7 @@ use crate::memory::{
     page_base, page_offset, Address, Memory, PageIndex, MAX_PAGE_INDEX, PAGE_SIZE,
 };
 use alloc::{boxed::Box, vec, vec::Vec};
-use brisc_isa::{Opcode, Word};
+use brisc_isa::{is_compressed, Opcode, Word};
 use core::fmt;
 use hashbrown::HashMap;
 
@@ -63,21 +63,21 @@ impl CodeCache {
 
         while slot < SLOTS && self.pages[position][slot].code == code::DECODE {
             let address = page_base(page).wrapping_add((slot as Address) << 1);
-            let Ok(instruction) = decode(Word::from_le_bytes(memory.load(address))) else {
+            let word = Word::from_le_bytes(memory.load(address));
+            if slot == SLOTS - 1 && !is_compressed(word) {
+                // The word continues on the next page, whether or not it is an instruction.
+                memory.watch(page.wrapping_add(1) & MAX_PAGE_INDEX);
+            }
+
+            let Ok(instruction) = decode(word) else {
                 self.pages[position][slot] = Op::ILLEGAL;
                 break;
             };
-            let is_wide = instruction.length == 4;
             self.pages[position][slot] = Op::new(instruction);
-
-            if is_wide && slot == SLOTS - 1 {
-                // The instruction continues on the next page.
-                memory.watch(page.wrapping_add(1) & MAX_PAGE_INDEX);
-            }
             if matches!(instruction.opcode, Opcode::Jal | Opcode::Jalr) {
                 break;
             }
-            slot += if is_wide { 2 } else { 1 };
+            slot += instruction.length as usize / 2;
         }
     }
 

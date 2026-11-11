@@ -133,7 +133,10 @@ where
 mod test {
     use super::*;
     use crate::test_suites;
-    use brisc_hw::memory::SparseMemory;
+    use brisc_hw::{
+        memory::{Memory, SparseMemory},
+        rv, rv_code, REG_A0,
+    };
 
     /// A configuration whose guest makes no system calls other than the one that ends a test.
     struct NoKernel;
@@ -156,23 +159,60 @@ mod test {
         assert_eq!((emu.cpu.pc, emu.cpu.instret), (0, 0));
     }
 
+    /// Builds an emulator that starts at `pc` in `memory`.
+    fn emulator(pc: XWord, memory: SparseMemory) -> StEmu<'static, NoKernel> {
+        StEmu::builder().with_pc(pc).with_memory(memory).with_kernel(()).with_ctx(()).build()
+    }
+
+    /// The address of an instruction whose first half is the end of a page and whose second
+    /// half is the start of the next one.
+    const STRADDLING: XWord = 0x1ffe;
+
+    #[test]
+    fn rewriting_the_second_half_of_an_instruction_on_the_next_page() {
+        let mut memory = SparseMemory::new();
+        memory.write(STRADDLING, &rv_code! { addi a0, zero, 5; ecall });
+        let mut emu = emulator(STRADDLING, memory);
+
+        // The kernel refuses the system call, which ends the run after the instruction.
+        assert_eq!(emu.run(), Err(EmulationError::Kernel(())));
+        assert_eq!(emu.cpu.registers.get(REG_A0), 5);
+
+        // The second half holds the immediate.
+        emu.memory.write(STRADDLING + 2, &rv!(addi a0, zero, 7).to_le_bytes()[2..]);
+        emu.cpu.pc = STRADDLING;
+        assert_eq!(emu.run(), Err(EmulationError::Kernel(())));
+        assert_eq!(emu.cpu.registers.get(REG_A0), 7);
+    }
+
+    #[test]
+    fn completing_an_illegal_instruction_on_the_next_page() {
+        // The second half holds the shift amount and, above it, bits that must be zero.
+        let slli = rv!(slli a0, a0, 1).to_le_bytes();
+        let mut memory = SparseMemory::new();
+        memory.write(STRADDLING, &[slli[0], slli[1], 0xff, 0xff]);
+        memory.write(STRADDLING + 4, &rv!(ecall).to_le_bytes());
+        let mut emu = emulator(STRADDLING, memory);
+        emu.cpu.registers.set(REG_A0, 3);
+
+        assert!(matches!(emu.run(), Err(EmulationError::Fault(Fault::Decode(_)))));
+        assert_eq!(emu.cpu.pc, STRADDLING);
+
+        emu.memory.write(STRADDLING + 2, &slli[2..]);
+        assert_eq!(emu.run(), Err(EmulationError::Kernel(())));
+        assert_eq!(emu.cpu.registers.get(REG_A0), 6);
+    }
+
     #[test]
     #[cfg(all(feature = "64-bit", feature = "a"))]
     fn lr_w_sign_extends() {
-        use brisc_hw::{memory::Memory, REG_A0, REG_A1};
+        use brisc_hw::REG_A1;
 
         let mut memory = SparseMemory::new();
-        // lr.w a0, (a1)
-        // ecall
-        memory.write(0x1000, &[0x2f, 0xa5, 0x05, 0x10, 0x73, 0x00, 0x00, 0x00]);
+        memory.write(0x1000, &rv_code! { lr.w a0, (a1); ecall });
         memory.write(0x2000, &0x8000_0000u32.to_le_bytes());
 
-        let mut emu = StEmu::<NoKernel>::builder()
-            .with_pc(0x1000)
-            .with_memory(memory)
-            .with_kernel(())
-            .with_ctx(())
-            .build();
+        let mut emu = emulator(0x1000, memory);
         emu.cpu.registers.set(REG_A1, 0x2000);
 
         assert_eq!(emu.run(), Err(EmulationError::Kernel(())));
