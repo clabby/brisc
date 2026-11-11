@@ -18,6 +18,14 @@ pub enum Stop<E = Infallible> {
     ///
     /// [Cpu::pc]: super::Cpu::pc
     Ecall,
+    /// The instruction at the program counter is an `ebreak`.
+    ///
+    /// It has not been retired and has changed no state. To continue after it, advance
+    /// [Cpu::pc] by the length of the instruction: two bytes if it is a `c.ebreak`, four
+    /// otherwise.
+    ///
+    /// [Cpu::pc]: super::Cpu::pc
+    Ebreak,
     /// The requested number of instructions has been retired.
     Budget,
     /// The instruction at the program counter cannot be executed. It changed no state.
@@ -33,6 +41,10 @@ pub enum Fault {
     /// The word at the program counter is not an instruction.
     #[error(transparent)]
     Decode(#[from] InstructionDecodeError),
+    /// The instruction writes to a control and status register that is read-only: one whose
+    /// address, given here, has its two highest bits set.
+    #[error("Write to the read-only CSR {0:#05x}")]
+    ReadOnlyCsr(u16),
     /// The address of an atomic instruction is not aligned to its access size.
     #[cfg(feature = "a")]
     #[error("Unaligned atomic memory access.")]

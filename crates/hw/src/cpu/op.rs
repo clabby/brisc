@@ -98,11 +98,41 @@ impl Op {
     }
 }
 
-/// Decodes the instruction in the low bits of `word`.
+/// Decodes the instruction in the low bits of `word` and checks that the hart can execute it.
 #[inline(always)]
 pub(super) const fn decode(word: Word) -> Result<Instruction, Fault> {
-    match Instruction::decode(word) {
-        Ok(instruction) => Ok(instruction),
-        Err(error) => Err(Fault::Decode(error)),
+    let instruction = match Instruction::decode(word) {
+        Ok(instruction) => instruction,
+        Err(error) => return Err(Fault::Decode(error)),
+    };
+
+    if matches!(
+        instruction.opcode,
+        Opcode::Csrrw |
+            Opcode::Csrrs |
+            Opcode::Csrrc |
+            Opcode::Csrrwi |
+            Opcode::Csrrsi |
+            Opcode::Csrrci
+    ) {
+        return check_csr(instruction);
     }
+    Ok(instruction)
+}
+
+/// Checks that an instruction that accesses a control and status register does not write to
+/// one that is read-only.
+#[cold]
+const fn check_csr(instruction: Instruction) -> Result<Instruction, Fault> {
+    // The instructions that set or clear bits only write if they name a source other than `x0`
+    // or an immediate other than zero.
+    let writes = match instruction.opcode {
+        Opcode::Csrrs | Opcode::Csrrc | Opcode::Csrrsi | Opcode::Csrrci => instruction.rs1 != 0,
+        _ => true,
+    };
+    // The two highest bits of the address of a read-only register are set.
+    if writes && instruction.imm >> 10 == 0b11 {
+        return Err(Fault::ReadOnlyCsr(instruction.imm as u16));
+    }
+    Ok(instruction)
 }

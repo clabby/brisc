@@ -27,6 +27,8 @@ pub(super) enum Exit<E> {
     Decode,
     /// The instruction at the returned program counter is an `ecall`. It has been retired.
     Ecall,
+    /// The instruction at the returned program counter is an `ebreak`.
+    Ebreak,
     /// This word, at the returned program counter, is not an instruction.
     Illegal(Word),
     /// The instruction at the returned program counter faulted.
@@ -397,16 +399,21 @@ pub(super) fn execute<B: Bus, const PRECISE: bool>(
             LrD | ScD | AmoswapD | AmoaddD | AmoxorD | AmoandD | AmoorD | AmominD | AmomaxD
                 | AmominuD | AmomaxuD => { atomic!(advance) }
 
-            // Breakpoints, privilege levels and interrupts are not modelled, and with a single
-            // hart and decoded code that is kept coherent with memory there is nothing to order
-            // or synchronize. Programs execute these rarely, so they are kept out of the way of
+            Ebreak => {
+                core::hint::cold_path();
+                n += 1;
+                break (Exit::Ebreak, pc!());
+            }
+            // Privilege levels and interrupts are not modelled, and with a single hart and
+            // decoded code that is kept coherent with memory there is nothing to order or
+            // synchronize. Programs execute these rarely, so they are kept out of the way of
             // the other instructions.
-            Ebreak | Fence | FenceI | Sret | Mret | Wfi | SfenceVma => {
+            Fence | FenceI | Sret | Mret | Wfi | SfenceVma => {
                 core::hint::cold_path();
                 slot += advance;
             }
-            // No control and status register is modelled: all of them read as zero and ignore
-            // writes.
+            // No control and status register is modelled: all of them read as zero, and writes
+            // to the ones that are not read-only are ignored.
             Csrrw | Csrrs | Csrrc | Csrrwi | Csrrsi | Csrrci => {
                 core::hint::cold_path();
                 set!(advance, 0)

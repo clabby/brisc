@@ -26,6 +26,18 @@ mod stop;
 pub use stop::{Fault, Stop};
 
 /// A RISC-V hart.
+///
+/// The hart executes the unprivileged instructions of the enabled instruction sets. Of the
+/// privileged architecture it models only what programs written for a bare hart run into:
+///
+/// - `ecall` and `ebreak` stop [Cpu::run] with [Stop::Ecall] and [Stop::Ebreak], for whoever drives
+///   the hart to act on.
+/// - Every control and status register reads as zero. Writes are ignored, except that an
+///   instruction that writes to a read-only register is a [Fault::ReadOnlyCsr]. `unimp`, which
+///   compilers emit where execution must not continue, is such an instruction.
+/// - `mret`, `sret`, `wfi` and `sfence.vma` do nothing, because there are no privilege levels,
+///   interrupts or address translation. `fence` and `fence.i` do nothing either: there is one hart,
+///   and decoded instructions follow writes to the bus without being told to.
 #[derive(Debug)]
 pub struct Cpu {
     /// The integer registers.
@@ -56,7 +68,7 @@ impl Cpu {
     }
 
     /// Executes instructions from `bus` until `budget` of them have been retired, or until an
-    /// `ecall`, a [Fault] or an error of the bus stops execution earlier.
+    /// `ecall`, an `ebreak`, a [Fault] or an error of the bus stops execution earlier.
     ///
     /// The instructions that the hart has decoded stay coherent with `bus` as long as the bus
     /// reports the writes to them, as [Bus] describes.
@@ -110,6 +122,7 @@ impl Cpu {
                     }
                 }
                 Exit::Ecall => break Stop::Ecall,
+                Exit::Ebreak => break Stop::Ebreak,
                 Exit::Illegal(word) => {
                     let fault = decode(word)
                         .expect_err("an illegal slot holds a word that does not decode");

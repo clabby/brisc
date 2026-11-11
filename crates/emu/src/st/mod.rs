@@ -22,6 +22,11 @@ pub enum EmulationError<K, B> {
     #[error(transparent)]
     Fault(#[from] Fault),
 
+    /// The guest executed an `ebreak`, which the program counter is left on. To continue,
+    /// advance [Cpu::pc] past it as [Stop::Ebreak] describes.
+    #[error("the guest executed an ebreak")]
+    Ebreak,
+
     /// The bus failed an access, by the guest or by the kernel.
     #[error("the bus failed an access")]
     Bus(B),
@@ -130,6 +135,7 @@ where
         loop {
             match self.cpu.run(&mut self.bus, u64::MAX) {
                 Stop::Ecall => return Ok(self.cpu.registers.get(REG_A7)),
+                Stop::Ebreak => return Err(EmulationError::Ebreak),
                 Stop::Budget => {}
                 Stop::Fault(fault) => return Err(EmulationError::Fault(fault)),
                 Stop::Bus(error) => return Err(EmulationError::Bus(error)),
@@ -163,7 +169,7 @@ mod test {
         bus::{Address, PageIndex},
         cpu::Registers,
         memory::SparseMemory,
-        rv, rv_code, REG_A0, REG_A1,
+        rv, rv_code, REG_A0, REG_A1, REG_A2,
     };
 
     /// A guest in plain memory that makes no system calls other than the one that ends a test.
@@ -246,6 +252,52 @@ mod test {
 
         assert_eq!(emu.run(), Err(EmulationError::Kernel(())));
         assert_eq!(emu.cpu.registers.get(REG_A0), 0xffff_ffff_8000_0000);
+    }
+
+    #[test]
+    fn ebreak_stops_before_it_is_retired() {
+        let mut memory = SparseMemory::new();
+        let code = rv_code! {
+            addi a0, zero, 1;
+            ebreak;
+            addi a0, a0, 1;
+            ecall;
+        };
+        memory.write(0x1000, &code).unwrap();
+        let mut emu = emulator::<NoKernel>(0x1000, memory, ());
+
+        assert_eq!(emu.run(), Err(EmulationError::Ebreak));
+        assert_eq!((emu.cpu.pc, emu.cpu.instret), (0x1004, 1));
+
+        emu.cpu.pc += 4;
+        assert_eq!(emu.run(), Err(EmulationError::Kernel(())));
+        assert_eq!(emu.cpu.registers.get(REG_A0), 2);
+    }
+
+    #[test]
+    fn control_and_status_registers_read_as_zero() {
+        const MSCRATCH: i64 = 0x340;
+        const CYCLE: i64 = 0xc00;
+
+        let mut memory = SparseMemory::new();
+        let code = rv_code! {
+            csrrw a0, {MSCRATCH}, a1;
+            csrrs a1, {MSCRATCH}, zero;
+            csrrs a2, {CYCLE}, zero;
+            csrrw zero, {CYCLE}, zero;
+        };
+        memory.write(0x1000, &code).unwrap();
+        let mut emu = emulator::<NoKernel>(0x1000, memory, ());
+        for register in [REG_A0, REG_A1, REG_A2] {
+            emu.cpu.registers.set(register, 5);
+        }
+
+        // The last instruction is what assemblers call `unimp`: a write to a read-only register.
+        assert_eq!(emu.run(), Err(EmulationError::Fault(Fault::ReadOnlyCsr(0xc00))));
+        assert_eq!((emu.cpu.pc, emu.cpu.instret), (0x100c, 3));
+        for register in [REG_A0, REG_A1, REG_A2] {
+            assert_eq!(emu.cpu.registers.get(register), 0);
+        }
     }
 
     /// A bus with memory below [BoundedMemory::END] and nothing above it. It implements no more

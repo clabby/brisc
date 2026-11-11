@@ -148,6 +148,7 @@ fn run_in_slices(elf: &[u8], budget: u64) -> u64 {
                 }
             }
             Stop::Fault(fault) => panic!("{fault}"),
+            Stop::Ebreak => panic!("ebreak"),
             Stop::Bus(error) => match error {},
         }
     }
