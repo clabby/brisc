@@ -6,7 +6,8 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 publish = false
 
 [lints]
