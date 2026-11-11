@@ -1,0 +1,22 @@
+[package]
+name = "brisc-jit"
+description = "A Cranelift JIT compiler for hot regions of RISC-V programs."
+version = "0.0.1"
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+brisc-isa.workspace = true
+cranelift-codegen = "0.137.1"
+cranelift-frontend = "0.137.1"
+cranelift-jit = "0.137.1"
+cranelift-module = "0.137.1"
+cranelift-native = "0.137.1"

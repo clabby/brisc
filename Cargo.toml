@@ -35,6 +35,7 @@ unusual_byte_groupings = "allow"
 [workspace.dependencies]
 # Local
 brisc-isa = { path = "crates/isa", default-features = false }
+brisc-jit = { path = "crates/jit", default-features = false }
 brisc-hw = { path = "crates/hw", default-features = false }
 brisc-emu = { path = "crates/emu", default-features = false }
 
