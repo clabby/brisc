@@ -40,6 +40,9 @@ pub(super) struct Op {
     pub(super) imm: i32,
 }
 
+// Eight bytes with eight-byte alignment: a slot never straddles two cache lines.
+const _: () = assert!(size_of::<Op>() == 8 && align_of::<Op>() == 8);
+
 impl Op {
     /// The initial content of a slot: leaves the interpreter to have the slot decoded.
     pub(super) const DECODE: Self = Self::bare(narrow::DECODE);
