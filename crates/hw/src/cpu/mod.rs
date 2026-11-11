@@ -5,11 +5,13 @@
 //! returns here to change pages, to have slots decoded, and to drop decoded instructions that the
 //! guest has overwritten.
 
-use crate::memory::{Address, Memory, PAGE_ADDRESS_MASK, PAGE_ADDRESS_SIZE};
+#[cfg(feature = "a")]
+use crate::memory::Address;
+use crate::memory::{page_base, page_index, Memory};
 use brisc_isa::{Word, XWord};
 
 mod code;
-use code::{CodeCache, SLOTS};
+use code::{slot_of, CodeCache, SLOTS};
 
 mod exec;
 use exec::{execute, Exit};
@@ -74,11 +76,11 @@ impl Cpu {
                 break Stop::Budget;
             }
 
-            let page = self.pc >> PAGE_ADDRESS_SIZE;
-            let slot = (self.pc as usize & PAGE_ADDRESS_MASK) >> 1;
+            let page = page_index(self.pc);
+            let slot = slot_of(self.pc);
             let position = self.code.position(page);
             let code = &self.code.pages[position];
-            let base = page << PAGE_ADDRESS_SIZE;
+            let base = page_base(page);
 
             let (exit, pc) = if remaining >= SLOTS as u64 {
                 execute::<M, false>(
@@ -107,9 +109,7 @@ impl Cpu {
 
             match exit {
                 Exit::Leave => {}
-                Exit::Decode => {
-                    self.code.decode(memory, page, (pc as usize & PAGE_ADDRESS_MASK) >> 1)
-                }
+                Exit::Decode => self.code.decode(memory, page, slot_of(pc)),
                 Exit::Ecall => break Stop::Ecall,
                 Exit::Illegal => {
                     let fault = lower(Word::from_le_bytes(memory.load(pc)))

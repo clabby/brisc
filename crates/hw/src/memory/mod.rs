@@ -20,6 +20,27 @@ pub const PAGE_SIZE: usize = 1 << PAGE_ADDRESS_SIZE;
 /// The mask to apply to an [Address] to obtain the offset within its page.
 pub const PAGE_ADDRESS_MASK: usize = PAGE_SIZE - 1;
 
+/// The largest [PageIndex].
+pub const MAX_PAGE_INDEX: PageIndex = Address::MAX >> PAGE_ADDRESS_SIZE;
+
+/// Returns the index of the page that contains `address`.
+#[inline(always)]
+pub const fn page_index(address: Address) -> PageIndex {
+    address >> PAGE_ADDRESS_SIZE
+}
+
+/// Returns the offset of `address` within its page.
+#[inline(always)]
+pub const fn page_offset(address: Address) -> usize {
+    address as usize & PAGE_ADDRESS_MASK
+}
+
+/// Returns the address of the first byte of `page`.
+#[inline(always)]
+pub const fn page_base(page: PageIndex) -> Address {
+    page << PAGE_ADDRESS_SIZE
+}
+
 /// The guest's address space.
 ///
 /// Every address is readable and writable. Memory that was never written reads as zero, and

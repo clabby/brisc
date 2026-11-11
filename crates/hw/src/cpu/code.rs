@@ -4,7 +4,9 @@ use super::{
     lower::lower,
     op::{self, narrow, wide, Op},
 };
-use crate::memory::{Address, Memory, PageIndex, PAGE_ADDRESS_SIZE, PAGE_SIZE};
+use crate::memory::{
+    page_base, page_offset, Address, Memory, PageIndex, MAX_PAGE_INDEX, PAGE_SIZE,
+};
 use alloc::{boxed::Box, vec, vec::Vec};
 use brisc_isa::Word;
 use core::fmt;
@@ -12,6 +14,12 @@ use hashbrown::HashMap;
 
 /// The number of instruction slots in a page: an instruction can start at every second byte.
 pub(super) const SLOTS: usize = PAGE_SIZE / 2;
+
+/// Returns the position within its [CodePage] of the slot for the instruction at `address`.
+#[inline(always)]
+pub(super) const fn slot_of(address: Address) -> usize {
+    page_offset(address) >> 1
+}
 
 /// The decoded form of one page of guest memory.
 ///
@@ -57,14 +65,14 @@ impl CodeCache {
         memory.watch(page);
 
         while slot < SLOTS && self.pages[position][slot].code == narrow::DECODE {
-            let address = (page << PAGE_ADDRESS_SIZE).wrapping_add((slot as Address) << 1);
+            let address = page_base(page).wrapping_add((slot as Address) << 1);
             let op = lower(Word::from_le_bytes(memory.load(address))).unwrap_or(Op::ILLEGAL);
             let is_wide = op.code & op::WIDE != 0;
             self.pages[position][slot] = op;
 
             if is_wide && slot == SLOTS - 1 {
                 // The instruction continues on the next page.
-                memory.watch(page.wrapping_add(1) & (PageIndex::MAX >> PAGE_ADDRESS_SIZE));
+                memory.watch(page.wrapping_add(1) & MAX_PAGE_INDEX);
             }
             if matches!(
                 op.code,
@@ -83,7 +91,7 @@ impl CodeCache {
             self.pages[*position][..SLOTS].fill(Op::DECODE);
         }
         // The last instruction of the previous page may continue on this one.
-        let previous = page.wrapping_sub(1) & (PageIndex::MAX >> PAGE_ADDRESS_SIZE);
+        let previous = page.wrapping_sub(1) & MAX_PAGE_INDEX;
         if let Some(position) = self.index.get(&previous) {
             self.pages[*position][SLOTS - 1] = Op::DECODE;
         }

@@ -1,6 +1,6 @@
 //! A sparse, paged [Memory].
 
-use super::{Address, Memory, PageIndex, PAGE_ADDRESS_MASK, PAGE_ADDRESS_SIZE, PAGE_SIZE};
+use super::{page_index, page_offset, Address, Memory, PageIndex, PAGE_SIZE};
 use alloc::{boxed::Box, vec, vec::Vec};
 use core::fmt;
 use hashbrown::HashMap;
@@ -8,8 +8,9 @@ use hashbrown::HashMap;
 /// The number of entries in the translation cache.
 const TLB_ENTRIES: usize = 1 << 10;
 
-/// A tag that matches no page: page indices are at least [PAGE_ADDRESS_SIZE] bits narrower than
-/// [PageIndex].
+/// A tag that matches no page: it is larger than [MAX_PAGE_INDEX].
+///
+/// [MAX_PAGE_INDEX]: super::MAX_PAGE_INDEX
 const NO_PAGE: PageIndex = PageIndex::MAX;
 
 /// A cached translation from a page to the frame that backs it.
@@ -110,12 +111,12 @@ impl SparseMemory {
     ) {
         let mut done = 0;
         while done < len {
-            let page = address >> PAGE_ADDRESS_SIZE;
-            let page_offset = address as usize & PAGE_ADDRESS_MASK;
-            let piece = (len - done).min(PAGE_SIZE - page_offset);
+            let page = page_index(address);
+            let offset = page_offset(address);
+            let piece = (len - done).min(PAGE_SIZE - offset);
 
             let frame = self.translate(page, map);
-            f(done..done + piece, &mut self.frames[frame].0[page_offset..page_offset + piece]);
+            f(done..done + piece, &mut self.frames[frame].0[offset..offset + piece]);
             if map && self.watched[frame] {
                 self.watched[frame] = false;
                 self.dirty.push(page);
@@ -136,13 +137,13 @@ impl fmt::Debug for SparseMemory {
 impl Memory for SparseMemory {
     #[inline(always)]
     fn load<const N: usize>(&mut self, address: Address) -> [u8; N] {
-        let page = address >> PAGE_ADDRESS_SIZE;
-        let page_offset = address as usize & PAGE_ADDRESS_MASK;
+        let page = page_index(address);
+        let offset = page_offset(address);
         let entry = self.tlb[page as usize & (TLB_ENTRIES - 1)];
 
-        if entry.read == page && page_offset + N <= PAGE_SIZE {
+        if entry.read == page && offset + N <= PAGE_SIZE {
             let mut bytes = [0; N];
-            bytes.copy_from_slice(&self.frames[entry.frame].0[page_offset..page_offset + N]);
+            bytes.copy_from_slice(&self.frames[entry.frame].0[offset..offset + N]);
             bytes
         } else {
             let mut bytes = [0; N];
@@ -153,12 +154,12 @@ impl Memory for SparseMemory {
 
     #[inline(always)]
     fn store<const N: usize>(&mut self, address: Address, bytes: [u8; N]) -> bool {
-        let page = address >> PAGE_ADDRESS_SIZE;
-        let page_offset = address as usize & PAGE_ADDRESS_MASK;
+        let page = page_index(address);
+        let offset = page_offset(address);
         let entry = self.tlb[page as usize & (TLB_ENTRIES - 1)];
 
-        if entry.write == page && page_offset + N <= PAGE_SIZE {
-            self.frames[entry.frame].0[page_offset..page_offset + N].copy_from_slice(&bytes);
+        if entry.write == page && offset + N <= PAGE_SIZE {
+            self.frames[entry.frame].0[offset..offset + N].copy_from_slice(&bytes);
             false
         } else {
             let dirty = self.dirty.len();

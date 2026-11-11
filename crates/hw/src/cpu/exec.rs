@@ -1,11 +1,11 @@
 //! The interpreter loop.
 
 use super::{
-    code::{CodePage, SLOTS},
+    code::{slot_of, CodePage, SLOTS},
     op::{narrow, wide, Op},
     Registers,
 };
-use crate::memory::{Memory, PAGE_ADDRESS_MASK, PAGE_ADDRESS_SIZE};
+use crate::memory::{page_index, Memory};
 use brisc_isa::{SXWord, XWord};
 
 #[cfg(feature = "64-bit")]
@@ -176,10 +176,10 @@ pub(super) fn execute<M: Memory, const PRECISE: bool>(
             ($advance:ident, $target:expr) => {{
                 let target: XWord = $target;
                 r[Registers::slot(op.rd)] = pc!().wrapping_add(($advance as XWord) << 1);
-                if target >> PAGE_ADDRESS_SIZE != base >> PAGE_ADDRESS_SIZE {
+                if page_index(target) != page_index(base) {
                     break (Exit::Leave, target);
                 }
-                slot = (target as usize & PAGE_ADDRESS_MASK) >> 1;
+                slot = slot_of(target);
                 check_budget!();
             }};
         }
