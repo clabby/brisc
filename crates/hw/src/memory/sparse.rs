@@ -2,6 +2,7 @@
 
 use super::{Address, Memory, PageIndex, PAGE_ADDRESS_MASK, PAGE_ADDRESS_SIZE, PAGE_SIZE};
 use alloc::{boxed::Box, vec, vec::Vec};
+use core::fmt;
 use hashbrown::HashMap;
 
 /// The number of entries in the translation cache.
@@ -21,19 +22,29 @@ struct TlbEntry {
     /// Set only when the page has a frame of its own and is not watched, so that the first store
     /// to an unmapped page and every store to a watched page take the slow path.
     write: PageIndex,
-    /// The offset of the frame within [SparseMemory::frames].
-    offset: usize,
+    /// The position of the frame within [SparseMemory::frames].
+    frame: usize,
 }
+
+/// The backing store of one page.
+///
+/// Frames are aligned to their size, so an access that is aligned in the guest is aligned on the
+/// host and never straddles a host cache line or page.
+#[derive(Clone)]
+#[repr(C, align(4096))]
+struct Frame([u8; PAGE_SIZE]);
+
+const _: () = assert!(align_of::<Frame>() == PAGE_SIZE && size_of::<Frame>() == PAGE_SIZE);
 
 /// A [Memory] that maps pages on first write.
 ///
-/// Pages are backed by 4 KiB frames in one contiguous allocation. A direct-mapped translation
-/// cache in front of the page table turns the common load or store into a tag comparison and a
-/// copy.
-#[derive(Debug, Clone)]
+/// Pages are backed by page-aligned 4 KiB frames in one contiguous allocation. A direct-mapped
+/// translation cache in front of the page table turns the common load or store into a tag
+/// comparison and a copy.
+#[derive(Clone)]
 pub struct SparseMemory {
-    /// The frames, back to back. Frame 0 is never written and backs every unmapped page.
-    frames: Vec<u8>,
+    /// The frames. Frame 0 is never written and backs every unmapped page.
+    frames: Vec<Frame>,
     /// The frame number of every mapped page.
     pages: HashMap<PageIndex, u32>,
     /// Whether each frame's page is watched.
@@ -53,9 +64,9 @@ impl Default for SparseMemory {
 impl SparseMemory {
     /// Creates an empty memory.
     pub fn new() -> Self {
-        let tlb = vec![TlbEntry { read: NO_PAGE, write: NO_PAGE, offset: 0 }; TLB_ENTRIES];
+        let tlb = vec![TlbEntry { read: NO_PAGE, write: NO_PAGE, frame: 0 }; TLB_ENTRIES];
         Self {
-            frames: vec![0; PAGE_SIZE],
+            frames: vec![Frame([0; PAGE_SIZE])],
             pages: HashMap::new(),
             watched: vec![false],
             dirty: Vec::new(),
@@ -73,8 +84,8 @@ impl SparseMemory {
         let frame = match self.pages.get(&page) {
             Some(frame) => *frame as usize,
             None if map => {
-                let frame = self.watched.len();
-                self.frames.resize(self.frames.len() + PAGE_SIZE, 0);
+                let frame = self.frames.len();
+                self.frames.push(Frame([0; PAGE_SIZE]));
                 self.watched.push(false);
                 self.pages.insert(page, frame as u32);
                 frame
@@ -83,23 +94,19 @@ impl SparseMemory {
         };
 
         let writable = frame != 0 && !self.watched[frame];
-        self.tlb[page as usize & (TLB_ENTRIES - 1)] = TlbEntry {
-            read: page,
-            write: if writable { page } else { NO_PAGE },
-            offset: frame * PAGE_SIZE,
-        };
+        self.tlb[page as usize & (TLB_ENTRIES - 1)] =
+            TlbEntry { read: page, write: if writable { page } else { NO_PAGE }, frame };
         frame
     }
 
     /// Calls `f` with each page-bounded piece of the `len` bytes starting at `address`: the
-    /// offset of the piece within the range, the offset of its first byte within
-    /// [SparseMemory::frames], and its length.
+    /// range of the piece within the `len` bytes, and the bytes of its frame that it covers.
     fn for_each_piece(
         &mut self,
         mut address: Address,
         len: usize,
         map: bool,
-        mut f: impl FnMut(&mut Self, usize, usize, usize),
+        mut f: impl FnMut(core::ops::Range<usize>, &mut [u8]),
     ) {
         let mut done = 0;
         while done < len {
@@ -108,7 +115,7 @@ impl SparseMemory {
             let piece = (len - done).min(PAGE_SIZE - page_offset);
 
             let frame = self.translate(page, map);
-            f(self, done, frame * PAGE_SIZE + page_offset, piece);
+            f(done..done + piece, &mut self.frames[frame].0[page_offset..page_offset + piece]);
             if map && self.watched[frame] {
                 self.watched[frame] = false;
                 self.dirty.push(page);
@@ -120,6 +127,12 @@ impl SparseMemory {
     }
 }
 
+impl fmt::Debug for SparseMemory {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SparseMemory").field("pages", &self.pages.len()).finish_non_exhaustive()
+    }
+}
+
 impl Memory for SparseMemory {
     #[inline(always)]
     fn load<const N: usize>(&mut self, address: Address) -> [u8; N] {
@@ -128,9 +141,8 @@ impl Memory for SparseMemory {
         let entry = self.tlb[page as usize & (TLB_ENTRIES - 1)];
 
         if entry.read == page && page_offset + N <= PAGE_SIZE {
-            let start = entry.offset + page_offset;
             let mut bytes = [0; N];
-            bytes.copy_from_slice(&self.frames[start..start + N]);
+            bytes.copy_from_slice(&self.frames[entry.frame].0[page_offset..page_offset + N]);
             bytes
         } else {
             let mut bytes = [0; N];
@@ -146,8 +158,7 @@ impl Memory for SparseMemory {
         let entry = self.tlb[page as usize & (TLB_ENTRIES - 1)];
 
         if entry.write == page && page_offset + N <= PAGE_SIZE {
-            let start = entry.offset + page_offset;
-            self.frames[start..start + N].copy_from_slice(&bytes);
+            self.frames[entry.frame].0[page_offset..page_offset + N].copy_from_slice(&bytes);
             false
         } else {
             let dirty = self.dirty.len();
@@ -159,16 +170,16 @@ impl Memory for SparseMemory {
     #[cold]
     #[inline(never)]
     fn read(&mut self, address: Address, buf: &mut [u8]) {
-        self.for_each_piece(address, buf.len(), false, |memory, done, start, piece| {
-            buf[done..done + piece].copy_from_slice(&memory.frames[start..start + piece]);
+        self.for_each_piece(address, buf.len(), false, |range, frame| {
+            buf[range].copy_from_slice(frame);
         });
     }
 
     #[cold]
     #[inline(never)]
     fn write(&mut self, address: Address, data: &[u8]) {
-        self.for_each_piece(address, data.len(), true, |memory, done, start, piece| {
-            memory.frames[start..start + piece].copy_from_slice(&data[done..done + piece]);
+        self.for_each_piece(address, data.len(), true, |range, frame| {
+            frame.copy_from_slice(&data[range]);
         });
     }
 
