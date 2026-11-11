@@ -2,14 +2,14 @@
 
 use crate::{
     cfg::EmuConfig,
-    kernel::{AsyncKernel, Kernel, Syscall, SyscallError},
+    kernel::{AsyncKernel, Kernel, MinimalKernel, Syscall, SyscallError, UnknownSyscall},
     st::StEmu,
 };
 use brisc_hw::{
     bus::Bus,
     cpu::{Registers, Stop},
     memory::SparseMemory,
-    XWord, REG_A0, REG_A1, REG_A2, REG_A7,
+    XWord, REG_A7,
 };
 use std::{
     fs,
@@ -60,8 +60,8 @@ impl TestProgram {
     pub fn load(elf: &[u8]) -> Self {
         Self(
             StEmu::<TestStEmuConfig>::builder()
-                .with_kernel(RiscvTestKernel)
-                .with_ctx(0)
+                .with_kernel(MinimalKernel)
+                .with_ctx(Vec::new())
                 .with_elf(elf)
                 .unwrap()
                 .build(),
@@ -79,8 +79,9 @@ impl TestProgram {
         assert_eq!(
             exit_code,
             0,
-            "Test failed | Failing Test #: {} | instructions: {instructions}",
+            "Test failed | Failing Test #: {} | instructions: {instructions} | output: {}",
             exit_code >> 1,
+            String::from_utf8_lossy(&self.0.ctx),
         );
         instructions
     }
@@ -96,15 +97,16 @@ pub fn run_riscv_test(test_path: &PathBuf) -> u64 {
     let instructions = TestProgram::load(&elf).run();
 
     let mut emu = StEmu::<SuspendingConfig>::builder()
-        .with_kernel(SuspendingKernel(RiscvTestKernel))
-        .with_ctx(0)
+        .with_kernel(SuspendingKernel::default())
+        .with_ctx(Vec::new())
         .with_elf(&elf)
         .unwrap()
         .build();
     assert_eq!(block_on(emu.run_async()), Ok(0));
     assert_eq!(emu.cpu.instret, instructions);
-    // Every program exits through a system call, which the kernel counted in the context.
-    assert!(emu.take_ctx() > 0);
+    // Every program exits through a system call.
+    assert!(emu.kernel.suspensions > 0);
+    tracing::info!(target: "test-runner", "output: {}", String::from_utf8_lossy(&emu.take_ctx()));
 
     // The budgets surround the number of instructions the interpreter can run between checks of
     // its budget, which is what separates its exact and its fast mode.
@@ -154,16 +156,17 @@ fn run_in_slices(elf: &[u8], budget: u64) -> u64 {
     }
 }
 
+/// The emulator that the test programs expect: plain memory and a kernel with `exit` and
+/// `write`, which collects what the program writes.
 #[derive(Default, Debug)]
 struct TestStEmuConfig;
 
 impl EmuConfig<'_> for TestStEmuConfig {
     type Bus = SparseMemory;
 
-    type Kernel = RiscvTestKernel;
+    type Kernel = MinimalKernel;
 
-    /// The number of system calls serviced.
-    type Context = u64;
+    type Context = Vec<u8>;
 }
 
 #[derive(Default, Debug)]
@@ -174,65 +177,29 @@ impl EmuConfig<'_> for SuspendingConfig {
 
     type Kernel = SuspendingKernel;
 
-    /// The number of system calls serviced.
-    type Context = u64;
+    type Context = Vec<u8>;
 }
 
-/// The kernel that the test programs expect: it implements `exit` and `write`.
+/// A [MinimalKernel] that suspends once before it services each system call.
 #[derive(Default, Debug)]
-struct RiscvTestKernel;
-
-impl Kernel<u64> for RiscvTestKernel {
-    /// The number of the unsupported system call.
-    type Error = XWord;
-
-    fn syscall<B: Bus>(
-        &mut self,
-        sysno: XWord,
-        bus: &mut B,
-        registers: &mut Registers,
-        serviced: &mut u64,
-    ) -> Result<Syscall, SyscallError<XWord, B::Error>> {
-        *serviced += 1;
-        match sysno {
-            0x5D => Ok(Syscall::Exit(registers.get(REG_A0))),
-            0x40 => {
-                let fd = registers.get(REG_A0);
-                let ptr = registers.get(REG_A1);
-                let len = registers.get(REG_A2);
-
-                let mut raw_msg = vec![0; len as usize];
-                bus.read(ptr, &mut raw_msg)?;
-                let msg = String::from_utf8_lossy(&raw_msg);
-
-                if fd == 1 {
-                    tracing::info!(target: "test-runner", "stdout: {}", msg);
-                } else if fd == 2 {
-                    tracing::error!(target: "test-runner", "stderr: {}", msg);
-                }
-                Ok(Syscall::Continue)
-            }
-            _ => Err(SyscallError::Kernel(sysno)),
-        }
-    }
+struct SuspendingKernel {
+    /// The number of times the kernel has suspended.
+    suspensions: u64,
 }
 
-/// A [RiscvTestKernel] that suspends once before it services each system call.
-#[derive(Debug)]
-struct SuspendingKernel(RiscvTestKernel);
-
-impl AsyncKernel<u64> for SuspendingKernel {
-    type Error = XWord;
+impl AsyncKernel<Vec<u8>> for SuspendingKernel {
+    type Error = UnknownSyscall;
 
     async fn syscall<B: Bus>(
         &mut self,
-        sysno: XWord,
+        syscall_no: XWord,
         bus: &mut B,
         registers: &mut Registers,
-        serviced: &mut u64,
-    ) -> Result<Syscall, SyscallError<XWord, B::Error>> {
+        output: &mut Vec<u8>,
+    ) -> Result<Syscall, SyscallError<UnknownSyscall, B::Error>> {
         SuspendOnce(false).await;
-        Kernel::syscall(&mut self.0, sysno, bus, registers, serviced)
+        self.suspensions += 1;
+        Kernel::syscall(&mut MinimalKernel, syscall_no, bus, registers, output)
     }
 }
 

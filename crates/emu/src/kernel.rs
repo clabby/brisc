@@ -7,7 +7,11 @@
 //! [Cpu::run]: brisc_hw::cpu::Cpu::run
 //! [Stop::Ecall]: brisc_hw::cpu::Stop::Ecall
 
-use brisc_hw::{bus::Bus, cpu::Registers, XWord};
+use brisc_hw::{
+    bus::{Address, Bus},
+    cpu::Registers,
+    XWord, REG_A0, REG_A1, REG_A2,
+};
 use core::future::{ready, Future};
 use thiserror::Error;
 
@@ -105,5 +109,114 @@ impl<S> Kernel<S> for () {
         _: &mut S,
     ) -> Result<Syscall, SyscallError<Self::Error, B::Error>> {
         Err(SyscallError::Kernel(()))
+    }
+}
+
+/// A kernel with the two system calls that a program without an operating system needs, under
+/// the numbers that Linux gives them on RISC-V.
+///
+/// - [MinimalKernel::EXIT] ends the program with the exit code in `a0`.
+/// - [MinimalKernel::WRITE] appends the `a2` bytes at the address in `a1` to the state of the
+///   kernel, whatever file descriptor `a0` names, and returns their number in `a0`.
+///
+/// The state can be any collection of bytes, such as a `Vec<u8>`.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct MinimalKernel;
+
+impl MinimalKernel {
+    /// The number of the `write` system call.
+    pub const WRITE: XWord = 64;
+
+    /// The number of the `exit` system call.
+    pub const EXIT: XWord = 93;
+}
+
+/// The number of a system call that the kernel does not implement.
+#[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
+#[error("unknown system call {0}")]
+pub struct UnknownSyscall(pub XWord);
+
+impl<S: Extend<u8>> Kernel<S> for MinimalKernel {
+    type Error = UnknownSyscall;
+
+    fn syscall<B: Bus>(
+        &mut self,
+        syscall_no: XWord,
+        bus: &mut B,
+        registers: &mut Registers,
+        output: &mut S,
+    ) -> Result<Syscall, SyscallError<Self::Error, B::Error>> {
+        match syscall_no {
+            Self::EXIT => Ok(Syscall::Exit(registers.get(REG_A0))),
+            Self::WRITE => {
+                let len = registers.get(REG_A2);
+                let mut address = registers.get(REG_A1);
+                let mut remaining = len;
+                // The bytes pass through a buffer on the stack, a piece at a time.
+                let mut buffer = [0; 256];
+                while remaining > 0 {
+                    let piece = &mut buffer[..remaining.min(256) as usize];
+                    bus.read(address, piece)?;
+                    output.extend(piece.iter().copied());
+                    address = address.wrapping_add(piece.len() as Address);
+                    remaining -= piece.len() as XWord;
+                }
+                registers.set(REG_A0, len);
+                Ok(Syscall::Continue)
+            }
+            _ => Err(SyscallError::Kernel(UnknownSyscall(syscall_no))),
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::{
+        cfg::EmuConfig,
+        st::{EmulationError, StEmu},
+    };
+    use brisc_hw::{memory::SparseMemory, rv_code};
+
+    struct Minimal;
+
+    impl EmuConfig<'_> for Minimal {
+        type Bus = SparseMemory;
+        type Kernel = MinimalKernel;
+        type Context = Vec<u8>;
+    }
+
+    #[test]
+    fn minimal_kernel_writes_and_exits() {
+        // More bytes than the kernel moves at a time.
+        let message = (0..300).map(|i| i as u8).collect::<Vec<_>>();
+        let code = rv_code! {
+            addi a0, zero, 1;
+            addi a1, zero, 0x700;
+            addi a2, zero, 300;
+            addi a7, zero, 64;
+            ecall;
+            // Exits with the number of bytes written, which the system call returned.
+            addi a7, zero, 93;
+            ecall;
+            // The exit ended the first run. This is where the second run begins.
+            addi a7, zero, 1;
+            ecall;
+        };
+        let mut bus = SparseMemory::new();
+        bus.write(0x1000, &code).unwrap();
+        bus.write(0x700, &message).unwrap();
+        let mut emu = StEmu::<Minimal>::builder()
+            .with_pc(0x1000)
+            .with_bus(bus)
+            .with_kernel(MinimalKernel)
+            .with_ctx(Vec::new())
+            .build();
+
+        assert_eq!(emu.run(), Ok(300));
+        assert_eq!(emu.ctx, message);
+
+        emu.cpu.pc += 4;
+        assert_eq!(emu.run(), Err(EmulationError::Kernel(UnknownSyscall(1))));
     }
 }
