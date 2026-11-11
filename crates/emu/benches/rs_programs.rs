@@ -1,6 +1,6 @@
-//! Benches for the [`StEmu`] on Rust programs.
+//! Benches for the [`Emulator`] on Rust programs.
 //!
-//! [`StEmu`]: brisc_emu::st::StEmu
+//! [`Emulator`]: brisc_emu::Emulator
 
 use brisc_emu::test_utils::TestProgram;
 use criterion::{criterion_group, BatchSize, Criterion, Throughput};

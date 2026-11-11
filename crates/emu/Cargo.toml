@@ -6,7 +6,8 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 publish = false
 autobenches = false
 
@@ -35,6 +36,7 @@ const-hex = { version = "1.15.0", features = ["hex"] }
 
 [features]
 default = [ "64-bit", "a", "c", "m" ]
+jit = [ "64-bit", "brisc-hw/jit" ]
 test-utils = [ "dep:rstest", "dep:tracing", "dep:tracing-subscriber" ]
 
 # Architecture features

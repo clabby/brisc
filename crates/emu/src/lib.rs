@@ -7,10 +7,11 @@
 
 extern crate alloc;
 
-pub mod cfg;
 pub mod elf;
 pub mod kernel;
-pub mod st;
+
+mod emulator;
+pub use emulator::{EmulationError, Emulator};
 
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;

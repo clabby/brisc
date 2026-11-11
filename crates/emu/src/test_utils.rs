@@ -1,9 +1,8 @@
 //! Test utilities for the emulator crate.
 
 use crate::{
-    cfg::EmuConfig,
     kernel::{AsyncKernel, Kernel, MinimalKernel, Syscall, SyscallError, UnknownSyscall},
-    st::StEmu,
+    Emulator,
 };
 use brisc_hw::{
     bus::Bus,
@@ -51,21 +50,40 @@ macro_rules! test_suites {
     }
 }
 
-/// A RISC-V test program loaded into an emulator.
+/// The emulator that the test programs expect: plain memory, and a kernel that collects what the
+/// program writes.
+type TestEmulator<K> = Emulator<SparseMemory, K, Vec<u8>>;
+
+/// Loads the ELF file elf into a new emulator.
+fn load<K>(kernel: K, elf: &[u8]) -> TestEmulator<K> {
+    let mut emu = Emulator::new(SparseMemory::new(), kernel, Vec::new());
+    emu.load_elf(elf).unwrap();
+    emu
+}
+
+/// Makes the JIT compiler, if there is one, compile regions at once and on the thread of the
+/// emulator. A run then covers as much of the program as the JIT can, and does not depend on
+/// timing.
+#[cfg_attr(not(feature = "jit"), allow(clippy::missing_const_for_fn))]
+fn deterministic<K>(emu: TestEmulator<K>) -> TestEmulator<K> {
+    #[cfg(feature = "jit")]
+    let emu = emu.with_jit(Some(brisc_hw::cpu::JitConfig {
+        threshold: 1,
+        compilation: brisc_hw::cpu::Compilation::Inline,
+        max_region_instructions: 1500,
+        optimize_after: Some(2_000),
+    }));
+    emu
+}
+
+/// A RISC-V test program loaded into an emulator with the default configuration.
 #[derive(Debug)]
-pub struct TestProgram(StEmu<'static, TestStEmuConfig>);
+pub struct TestProgram(TestEmulator<MinimalKernel>);
 
 impl TestProgram {
-    /// Loads the ELF file `elf` into a fresh emulator.
+    /// Loads the ELF file elf into a fresh emulator.
     pub fn load(elf: &[u8]) -> Self {
-        Self(
-            StEmu::<TestStEmuConfig>::builder()
-                .with_kernel(MinimalKernel)
-                .with_ctx(Vec::new())
-                .with_elf(elf)
-                .unwrap()
-                .build(),
-        )
+        Self(load(MinimalKernel, elf))
     }
 
     /// Runs the program until it exits and returns the number of instructions it retired.
@@ -89,19 +107,14 @@ impl TestProgram {
 
 /// Runs the test program at `test_path` and returns the number of instructions it retired.
 ///
-/// The program is run with a synchronous kernel, with an asynchronous kernel that suspends on
-/// every system call, and in slices of a few instruction budgets. All runs must retire the same
-/// instructions.
+/// The program is run with the default configuration of the emulator, with an asynchronous kernel
+/// that suspends on every system call, and in slices of a few instruction budgets. All runs must
+/// retire the same instructions. The last three runs are deterministic: see [deterministic].
 pub fn run_riscv_test(test_path: &PathBuf) -> u64 {
     let elf = fs::read(test_path).unwrap();
     let instructions = TestProgram::load(&elf).run();
 
-    let mut emu = StEmu::<SuspendingConfig>::builder()
-        .with_kernel(SuspendingKernel::default())
-        .with_ctx(Vec::new())
-        .with_elf(&elf)
-        .unwrap()
-        .build();
+    let mut emu = deterministic(load(SuspendingKernel::default(), &elf));
     assert_eq!(block_on(emu.run_async()), Ok(0));
     assert_eq!(emu.cpu.instret, instructions);
     // Every program exits through a system call.
@@ -125,7 +138,7 @@ pub fn run_riscv_test(test_path: &PathBuf) -> u64 {
 /// Panics if the program does not exit with code zero or if a slice retires the wrong number of
 /// instructions.
 fn run_in_slices(elf: &[u8], budget: u64) -> u64 {
-    let mut emu = TestProgram::load(elf).0;
+    let mut emu = deterministic(load(MinimalKernel, elf));
     loop {
         let retired = emu.cpu.instret;
         let stop = emu.cpu.run(&mut emu.bus, budget);
@@ -154,30 +167,6 @@ fn run_in_slices(elf: &[u8], budget: u64) -> u64 {
             Stop::Bus(error) => match error {},
         }
     }
-}
-
-/// The emulator that the test programs expect: plain memory and a kernel with `exit` and
-/// `write`, which collects what the program writes.
-#[derive(Default, Debug)]
-struct TestStEmuConfig;
-
-impl EmuConfig<'_> for TestStEmuConfig {
-    type Bus = SparseMemory;
-
-    type Kernel = MinimalKernel;
-
-    type Context = Vec<u8>;
-}
-
-#[derive(Default, Debug)]
-struct SuspendingConfig;
-
-impl EmuConfig<'_> for SuspendingConfig {
-    type Bus = SparseMemory;
-
-    type Kernel = SuspendingKernel;
-
-    type Context = Vec<u8>;
 }
 
 /// A [MinimalKernel] that suspends once before it services each system call.

@@ -172,19 +172,8 @@ impl<S: Extend<u8>> Kernel<S> for MinimalKernel {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{
-        cfg::EmuConfig,
-        st::{EmulationError, StEmu},
-    };
+    use crate::{EmulationError, Emulator};
     use brisc_hw::{memory::SparseMemory, rv_code};
-
-    struct Minimal;
-
-    impl EmuConfig<'_> for Minimal {
-        type Bus = SparseMemory;
-        type Kernel = MinimalKernel;
-        type Context = Vec<u8>;
-    }
 
     #[test]
     fn minimal_kernel_writes_and_exits() {
@@ -206,12 +195,7 @@ mod test {
         let mut bus = SparseMemory::new();
         bus.write(0x1000, &code).unwrap();
         bus.write(0x700, &message).unwrap();
-        let mut emu = StEmu::<Minimal>::builder()
-            .with_pc(0x1000)
-            .with_bus(bus)
-            .with_kernel(MinimalKernel)
-            .with_ctx(Vec::new())
-            .build();
+        let mut emu = Emulator::new(bus, MinimalKernel, Vec::new()).with_entry(0x1000);
 
         assert_eq!(emu.run(), Ok(300));
         assert_eq!(emu.ctx, message);

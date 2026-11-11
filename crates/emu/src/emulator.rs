@@ -1,7 +1,7 @@
-//! Single-threaded emulator.
+//! The emulator: a hart on a bus, with the kernel that services its system calls.
 
 use crate::{
-    cfg::EmuConfig,
+    elf::{load_elf, LoadError},
     kernel::{AsyncKernel, Kernel, Syscall, SyscallError},
 };
 use brisc_hw::{
@@ -11,19 +11,16 @@ use brisc_hw::{
 };
 use thiserror::Error;
 
-mod builder;
-pub use builder::StEmuBuilder;
-
-/// An error that can occur during emulation. `K` is the error of the kernel and `B` the error
-/// of the bus.
+/// An error that can occur during emulation. K is the error of the kernel and B the error of the
+/// bus.
 #[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EmulationError<K, B> {
     /// The guest tried to execute an instruction that cannot be executed.
     #[error(transparent)]
     Fault(#[from] Fault),
 
-    /// The guest executed an `ebreak`, which the program counter is left on. To continue,
-    /// advance [Cpu::pc] past it as [Stop::Ebreak] describes.
+    /// The guest executed an ebreak, which the program counter is left on. To continue, advance
+    /// [Cpu::pc] past it as [Stop::Ebreak] describes.
     #[error("the guest executed an ebreak")]
     Ebreak,
 
@@ -45,53 +42,70 @@ impl<K, B> From<SyscallError<K, B>> for EmulationError<K, B> {
     }
 }
 
-/// The error type of the kernel of `Config`.
-pub type KernelError<'a, Config> =
-    <<Config as EmuConfig<'a>>::Kernel as AsyncKernel<<Config as EmuConfig<'a>>::Context>>::Error;
-
-/// The error type of the bus of `Config`.
-pub type BusError<'a, Config> = <<Config as EmuConfig<'a>>::Bus as Bus>::Error;
-
-/// A [`Result`] type alias for emulation results.
-pub type EmulationResult<'a, T, Config> =
-    Result<T, EmulationError<KernelError<'a, Config>, BusError<'a, Config>>>;
-
-/// A single RISC-V hart with its bus, the kernel that services its system calls, and the
-/// context handed to the kernel.
+/// A RISC-V hart with its bus, the kernel that services its system calls, and the state that
+/// the kernel works on.
 ///
-/// [StEmu::run] drives a [Kernel] and [StEmu::run_async] an [AsyncKernel]. Both execute guest
-/// instructions with the same [Cpu::run] and differ only in how they wait for the kernel.
+/// - B is the [Bus] that the hart runs on: its memory and devices.
+/// - K is the kernel. [Emulator::run] drives a [Kernel] and [Emulator::run_async] an [AsyncKernel].
+///   Both execute guest instructions with the same [Cpu::run] and differ only in how they wait for
+///   the kernel.
+/// - S is the state that every system call receives. It can be anything, including a borrow.
+///
+/// The hart is a public field, so its registers, program counter and configuration are there to
+/// inspect and change between runs.
 #[derive(Debug)]
-pub struct StEmu<'ctx, Config>
-where
-    Config: EmuConfig<'ctx>,
-{
-    /// The processor.
+pub struct Emulator<B, K, S = ()> {
+    /// The hart.
     pub cpu: Cpu,
-    /// The memory and devices of the processor.
-    pub bus: Config::Bus,
+    /// The memory and devices of the hart.
+    pub bus: B,
     /// The system call interface.
-    pub kernel: Config::Kernel,
-    /// The emulator's context.
-    pub ctx: Config::Context,
+    pub kernel: K,
+    /// The state that the kernel works on.
+    pub ctx: S,
 }
 
-impl<'ctx, Config> StEmu<'ctx, Config>
-where
-    Config: EmuConfig<'ctx>,
-{
-    /// Creates a new [`StEmuBuilder`].
-    pub fn builder() -> StEmuBuilder<'ctx, Config> {
-        StEmuBuilder::default()
+impl<B: Bus, K, S> Emulator<B, K, S> {
+    /// Creates an emulator whose hart starts at address zero.
+    pub fn new(bus: B, kernel: K, ctx: S) -> Self {
+        Self { cpu: Cpu::new(0), bus, kernel, ctx }
+    }
+
+    /// Sets the program counter, which is where the program starts.
+    #[must_use]
+    pub const fn with_entry(mut self, pc: XWord) -> Self {
+        self.cpu.pc = pc;
+        self
+    }
+
+    /// Sets how the hart uses the JIT compiler, or turns it off with None.
+    #[cfg(feature = "jit")]
+    #[must_use]
+    pub fn with_jit(mut self, config: Option<brisc_hw::cpu::JitConfig>) -> Self {
+        self.cpu.set_jit(config);
+        self
+    }
+
+    /// Loads an ELF file onto the bus and sets the program counter to its entry point.
+    pub fn load_elf(&mut self, elf: &[u8]) -> Result<(), LoadError<B::Error>> {
+        self.cpu.pc = load_elf(&mut self.bus, elf)?;
+        Ok(())
+    }
+
+    /// Destroys the emulator and returns the state that the kernel works on.
+    pub fn take_ctx(self) -> S {
+        self.ctx
     }
 
     /// Executes the program until it exits, returning its exit code.
     ///
-    /// After an error the emulator is as it was before the instruction or the system call that
-    /// failed, and running it again tries that again.
-    pub fn run(&mut self) -> EmulationResult<'ctx, XWord, Config>
+    /// After a fault, an `ebreak` or an error of the bus, the emulator is as it was before the
+    /// instruction that failed, and running it again tries that again. After an error of the
+    /// kernel the `ecall` has been executed and counted, and running again makes the system call
+    /// again; the kernel may have changed the registers, the bus and the state before it failed.
+    pub fn run(&mut self) -> Result<XWord, EmulationError<K::Error, B::Error>>
     where
-        Config::Kernel: Kernel<Config::Context, Error = KernelError<'ctx, Config>>,
+        K: Kernel<S>,
     {
         loop {
             let syscall_no = self.run_to_syscall()?;
@@ -111,9 +125,11 @@ where
     /// Executes the program until it exits, returning its exit code. Suspends whenever the
     /// kernel does.
     ///
-    /// After an error the emulator is as it was before the instruction or the system call that
-    /// failed, and running it again tries that again.
-    pub async fn run_async(&mut self) -> EmulationResult<'ctx, XWord, Config> {
+    /// Errors leave the emulator as they do for [Emulator::run].
+    pub async fn run_async(&mut self) -> Result<XWord, EmulationError<K::Error, B::Error>>
+    where
+        K: AsyncKernel<S>,
+    {
         loop {
             let syscall_no = self.run_to_syscall()?;
             let syscall = AsyncKernel::syscall(
@@ -131,7 +147,7 @@ where
     }
 
     /// Executes instructions up to the next system call and returns its number.
-    fn run_to_syscall(&mut self) -> EmulationResult<'ctx, XWord, Config> {
+    fn run_to_syscall<E>(&mut self) -> Result<XWord, EmulationError<E, B::Error>> {
         loop {
             match self.cpu.run(&mut self.bus, u64::MAX) {
                 Stop::Ecall => return Ok(self.cpu.registers.get(REG_A7)),
@@ -144,7 +160,7 @@ where
     }
 
     /// Returns the exit code if the system call ended the program, and otherwise moves the
-    /// program counter past the `ecall`.
+    /// program counter past the ecall.
     const fn finish_syscall(&mut self, syscall: Syscall) -> Option<XWord> {
         match syscall {
             Syscall::Continue => {
@@ -153,11 +169,6 @@ where
             }
             Syscall::Exit(exit_code) => Some(exit_code),
         }
-    }
-
-    /// Destroys the emulator and returns the context.
-    pub fn take_ctx(self) -> Config::Context {
-        self.ctx
     }
 }
 
@@ -172,31 +183,15 @@ mod test {
         rv, rv_code, REG_A0, REG_A1, REG_A2,
     };
 
-    /// A guest in plain memory that makes no system calls other than the one that ends a test.
-    struct NoKernel;
-
-    impl EmuConfig<'_> for NoKernel {
-        type Bus = SparseMemory;
-        type Kernel = ();
-        type Context = ();
-    }
-
-    /// Builds an emulator that starts at `pc` on `bus`.
-    fn emulator<Config>(
-        pc: XWord,
-        bus: Config::Bus,
-        kernel: Config::Kernel,
-    ) -> StEmu<'static, Config>
-    where
-        Config: EmuConfig<'static, Context = ()>,
-    {
-        StEmu::builder().with_pc(pc).with_bus(bus).with_kernel(kernel).with_ctx(()).build()
+    /// An emulator for a guest that has no kernel and no state, starting at pc.
+    fn emulator<B: Bus, K>(pc: XWord, bus: B, kernel: K) -> Emulator<B, K> {
+        Emulator::new(bus, kernel, ()).with_entry(pc)
     }
 
     #[test]
     fn executing_unmapped_memory_faults() {
         // Unmapped memory reads as zero, which is not an instruction.
-        let mut emu = emulator::<NoKernel>(0, SparseMemory::new(), ());
+        let mut emu = emulator(0, SparseMemory::new(), ());
         assert!(matches!(emu.run(), Err(EmulationError::Fault(Fault::Decode(_)))));
         assert_eq!((emu.cpu.pc, emu.cpu.instret), (0, 0));
     }
@@ -209,7 +204,7 @@ mod test {
     fn rewriting_the_second_half_of_an_instruction_on_the_next_page() {
         let mut memory = SparseMemory::new();
         memory.write(STRADDLING, &rv_code! { addi a0, zero, 5; ecall }).unwrap();
-        let mut emu = emulator::<NoKernel>(STRADDLING, memory, ());
+        let mut emu = emulator(STRADDLING, memory, ());
 
         // The kernel refuses the system call, which ends the run after the instruction.
         assert_eq!(emu.run(), Err(EmulationError::Kernel(())));
@@ -229,7 +224,7 @@ mod test {
         let mut memory = SparseMemory::new();
         memory.write(STRADDLING, &[slli[0], slli[1], 0xff, 0xff]).unwrap();
         memory.write(STRADDLING + 4, &rv!(ecall).to_le_bytes()).unwrap();
-        let mut emu = emulator::<NoKernel>(STRADDLING, memory, ());
+        let mut emu = emulator(STRADDLING, memory, ());
         emu.cpu.registers.set(REG_A0, 3);
 
         assert!(matches!(emu.run(), Err(EmulationError::Fault(Fault::Decode(_)))));
@@ -247,7 +242,7 @@ mod test {
         memory.write(0x1000, &rv_code! { lr.w a0, (a1); ecall }).unwrap();
         memory.write(0x2000, &0x8000_0000u32.to_le_bytes()).unwrap();
 
-        let mut emu = emulator::<NoKernel>(0x1000, memory, ());
+        let mut emu = emulator(0x1000, memory, ());
         emu.cpu.registers.set(REG_A1, 0x2000);
 
         assert_eq!(emu.run(), Err(EmulationError::Kernel(())));
@@ -264,7 +259,7 @@ mod test {
             ecall;
         };
         memory.write(0x1000, &code).unwrap();
-        let mut emu = emulator::<NoKernel>(0x1000, memory, ());
+        let mut emu = emulator(0x1000, memory, ());
 
         assert_eq!(emu.run(), Err(EmulationError::Ebreak));
         assert_eq!((emu.cpu.pc, emu.cpu.instret), (0x1004, 1));
@@ -287,7 +282,7 @@ mod test {
             csrrw zero, {CYCLE}, zero;
         };
         memory.write(0x1000, &code).unwrap();
-        let mut emu = emulator::<NoKernel>(0x1000, memory, ());
+        let mut emu = emulator(0x1000, memory, ());
         for register in [REG_A0, REG_A1, REG_A2] {
             emu.cpu.registers.set(register, 5);
         }
@@ -366,14 +361,6 @@ mod test {
         }
     }
 
-    struct Bounded;
-
-    impl EmuConfig<'_> for Bounded {
-        type Bus = BoundedMemory;
-        type Kernel = LoadKernel;
-        type Context = ();
-    }
-
     #[test]
     fn a_store_that_the_bus_fails_can_be_tried_again() {
         let mut bus = BoundedMemory::default();
@@ -384,7 +371,7 @@ mod test {
             ecall;
         };
         bus.write(0x1000, &code).unwrap();
-        let mut emu = emulator::<Bounded>(0x1000, bus, LoadKernel);
+        let mut emu = emulator(0x1000, bus, LoadKernel);
         emu.cpu.registers.set(REG_A1, BoundedMemory::END);
 
         // The store stops the run before it has changed anything.
@@ -402,7 +389,7 @@ mod test {
         let last = BoundedMemory::END - 4;
         let mut bus = BoundedMemory::default();
         bus.write(last, &rv!(addi a0, zero, 1).to_le_bytes()).unwrap();
-        let mut emu = emulator::<Bounded>(last, bus, LoadKernel);
+        let mut emu = emulator(last, bus, LoadKernel);
 
         // Fetching it does not read past the end, but there is no instruction after it.
         assert_eq!(emu.run(), Err(EmulationError::Bus(OutOfBounds(BoundedMemory::END))));

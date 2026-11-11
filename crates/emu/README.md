@@ -1,16 +1,16 @@
 # `brisc-emu`
 
-This crate contains a single-threaded RISC-V emulator. `StEmu` puts together a hart from
-`brisc-hw`, the bus it runs on, a kernel that services its system calls, and a context that the
-kernel works on. An `EmuConfig` names the three types:
+This crate contains a RISC-V emulator. An `Emulator` puts together a hart from `brisc-hw`, the bus it runs on, a
+kernel that services its system calls, and a context that the kernel works on:
 
 - The bus is any `brisc_hw::bus::Bus`: `SparseMemory`, or memory and devices of your own.
 - The kernel is a `Kernel` or an `AsyncKernel`. `MinimalKernel` has the `exit` and `write` system
   calls, which is enough for programs that only compute and print.
 - The context is state outside the kernel that every system call receives. The emulator hands
-  it back with `StEmu::take_ctx`.
+  it back with `Emulator::take_ctx`.
 
-The crate also has an ELF loader, which the builder of the emulator uses.
+The hart is configured through `Emulator::cpu`, and the crate has an ELF loader to put programs on
+the bus.
 
 ## Features
 
@@ -23,13 +23,17 @@ following features:
 * `a` - Standard Extension for Atomic Instructions
 * `c` - Standard Extension for Compressed Instructions.
 
+### JIT compiler
+
+The `jit` feature adds a compiler for hot loops, which is off by default because it needs the
+standard library and a 64-bit hart. Use `Emulator::with_jit` to configure it. See `brisc-hw` for what it does.
+
 ## Usage
 
 ```rust
 use brisc_emu::{
-    cfg::EmuConfig,
     kernel::{Kernel, Syscall, SyscallError},
-    st::StEmu,
+    Emulator,
 };
 use brisc_hw::{
     bus::Bus,
@@ -97,21 +101,9 @@ impl Kernel<String> for ExampleKernel {
     }
 }
 
-struct ExampleEmuConfig;
-
-impl EmuConfig<'_> for ExampleEmuConfig {
-    type Bus = SparseMemory;
-    type Kernel = ExampleKernel;
-    type Context = String;
-}
-
 let elf = const_hex::decode(HELLO_WORLD_ELF).unwrap();
-let mut emu = StEmu::<ExampleEmuConfig>::builder()
-    .with_kernel(ExampleKernel)
-    .with_ctx(String::new())
-    .with_elf(&elf)
-    .unwrap()
-    .build();
+let mut emu = Emulator::new(SparseMemory::new(), ExampleKernel, String::new());
+emu.load_elf(&elf).unwrap();
 
 let exit_code = emu.run().unwrap();
 assert_eq!(exit_code, 0);
@@ -119,9 +111,10 @@ assert_eq!(emu.take_ctx(), "Hello, world!\n");
 ```
 
 A kernel that needs to wait for something implements `AsyncKernel` instead and is driven by
-`StEmu::run_async`. Both kinds of kernel are available in the same build.
+`Emulator::run_async`. Both kinds of kernel are available in the same build.
 
-`StEmu::run` returns an `EmulationError` when the guest executes something that is not an
+`Emulator::run` returns an `EmulationError` when the guest executes something that is not an
 instruction, executes an `ebreak`, when the bus fails an access, and when the kernel fails a
-system call. The emulator stays as it was before the instruction or system call that failed, so
-the caller can inspect it, repair the cause and run it again.
+system call. After the first three the emulator is as it was before the instruction that failed, so
+the caller can inspect it, repair the cause and run it again. After a failed system call, running again
+makes the call again, and the kernel may have changed things before it failed.
