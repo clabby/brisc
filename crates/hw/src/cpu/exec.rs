@@ -36,6 +36,10 @@ pub(super) enum Exit<E> {
     Fault(Fault),
     /// The bus failed an access of the instruction at the returned program counter.
     Bus(E),
+    /// Control has flowed back to the slot at the returned program counter often enough for a
+    /// region to be compiled there.
+    #[cfg(feature = "jit")]
+    Hot,
 }
 
 /// Matches on an [Op::code].
@@ -142,11 +146,17 @@ fn op_at(code: &CodePage, slot: usize) -> Op {
     clippy::unnecessary_cast,
     reason = "XWord is 32 or 64 bits wide depending on the enabled features"
 )]
-pub(super) fn execute<B: Bus, const PRECISE: bool>(
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the interpreter keeps its state in locals, and bundling it would not make it faster"
+)]
+pub(super) fn execute<B: Bus, const PRECISE: bool, const JIT: bool>(
     registers: &mut Registers,
     #[cfg(feature = "a")] reservation: &mut Option<Address>,
     bus: &mut B,
     code: &CodePage,
+    #[cfg(feature = "jit")] counters: &mut [u16; SLOTS],
+    #[cfg(feature = "jit")] threshold: u16,
     base: XWord,
     mut slot: usize,
     remaining: &mut u64,
@@ -240,6 +250,20 @@ pub(super) fn execute<B: Bus, const PRECISE: bool>(
                 }
             }};
         }
+        // Counts a jump back to `$target` and leaves the loop if it has become hot.
+        macro_rules! back_edge {
+            ($target:expr) => {
+                #[cfg(feature = "jit")]
+                if JIT && $target <= slot {
+                    let counter = &mut counters[$target];
+                    *counter = counter.wrapping_add(1);
+                    if *counter >= threshold {
+                        slot = $target;
+                        break (Exit::Hot, pc!());
+                    }
+                }
+            };
+        }
         macro_rules! branch {
             ($advance:ident, $taken:expr) => {{
                 if $taken {
@@ -247,6 +271,7 @@ pub(super) fn execute<B: Bus, const PRECISE: bool>(
                     if target >= SLOTS {
                         break (Exit::Leave, pc!().wrapping_add(imm!()));
                     }
+                    back_edge!(target);
                     slot = target;
                 } else {
                     slot += $advance;
@@ -262,6 +287,7 @@ pub(super) fn execute<B: Bus, const PRECISE: bool>(
                 if page_index(target) != page_index(base) {
                     break (Exit::Leave, target);
                 }
+                back_edge!(slot_of(target));
                 slot = slot_of(target);
                 check_budget!();
             }};

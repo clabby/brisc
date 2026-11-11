@@ -126,4 +126,20 @@ pub trait Bus {
     fn pop_dirty(&mut self) -> Option<PageIndex> {
         None
     }
+
+    /// Describes a software TLB that compiled code may probe to access memory without calling
+    /// the bus, or returns `None` if the bus does not have one.
+    ///
+    /// Compiled code performs the accesses that hit the software TLB itself, so the bus does not
+    /// see them, whether they are loads or stores. A bus therefore only describes a software TLB
+    /// that serves accesses that the bus would perform in the same way, with no error, no side
+    /// effect and no need to hear about them: the contract of [brisc_jit::Probe::new], which is
+    /// unsafe for that reason. A bus that wraps another one must not forward its probe unless
+    /// it adds none of those.
+    ///
+    /// The pointer must stay valid until the bus is used or moved.
+    #[cfg(feature = "jit")]
+    fn probe(&mut self) -> Option<*const brisc_jit::Probe> {
+        None
+    }
 }

@@ -125,9 +125,27 @@ impl Op {
     /// ## Panics
     ///
     /// Panics if the [Op] does not stand for an instruction.
-    #[cfg(feature = "a")]
+    #[cfg(any(feature = "a", feature = "jit"))]
     pub(super) const fn opcode(self) -> Opcode {
         Opcode::ALL[((self.code() & !code::WIDE) - code::FIRST_OPCODE) as usize]
+    }
+
+    /// Returns the instruction that the [Op] packs.
+    ///
+    /// ## Panics
+    ///
+    /// Panics if the [Op] does not stand for an instruction.
+    #[cfg(feature = "jit")]
+    pub(super) const fn instruction(self) -> Instruction {
+        let sink = Registers::SINK as usize;
+        Instruction {
+            opcode: self.opcode(),
+            rd: if self.rd() == sink { 0 } else { self.rd() as u8 },
+            rs1: self.rs1() as u8,
+            rs2: self.rs2() as u8,
+            imm: self.imm(),
+            length: if self.code() & code::WIDE != 0 { 4 } else { 2 },
+        }
     }
 }
 

@@ -26,6 +26,9 @@ pub(super) type CodePage = [Op; SLOTS + 2];
 #[derive(Default)]
 pub(super) struct CodeCache {
     pub(super) pages: Vec<Box<CodePage>>,
+    /// How often control has flowed back to each slot of each page in [Self::pages].
+    #[cfg(feature = "jit")]
+    pub(super) counters: Vec<Box<[u16; SLOTS]>>,
     /// The position in [Self::pages] of each page that has been decoded from.
     index: HashMap<PageIndex, usize>,
     /// The page most recently looked up and its position in [Self::pages].
@@ -46,6 +49,8 @@ impl CodeCache {
             code[SLOTS..].fill(Op::PAGE_END);
             self.pages
                 .push(code.into_boxed_slice().try_into().expect("a page has SLOTS + 2 slots"));
+            #[cfg(feature = "jit")]
+            self.counters.push(Box::new([0; SLOTS]));
             self.pages.len() - 1
         });
         self.last = Some((page, position));
@@ -95,15 +100,19 @@ impl CodeCache {
 
     /// Forgets the instructions decoded from the bytes of `page`.
     #[cold]
-    pub(super) fn invalidate(&mut self, page: PageIndex) {
-        if let Some(position) = self.index.get(&page) {
-            self.pages[*position][..SLOTS].fill(Op::DECODE);
+    pub(super) fn invalidate(&mut self, page: PageIndex) -> Option<usize> {
+        let position = self.index.get(&page).copied();
+        if let Some(position) = position {
+            self.pages[position][..SLOTS].fill(Op::DECODE);
+            #[cfg(feature = "jit")]
+            self.counters[position].fill(0);
         }
         // The last instruction of the previous page may continue on this one.
         let previous = page.wrapping_sub(1) & MAX_PAGE_INDEX;
         if let Some(position) = self.index.get(&previous) {
             self.pages[*position][SLOTS - 1] = Op::DECODE;
         }
+        position
     }
 }
 

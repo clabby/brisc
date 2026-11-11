@@ -16,6 +16,7 @@ const NO_PAGE: PageIndex = PageIndex::MAX;
 
 /// A cached translation from a page to the frame that backs it.
 #[derive(Debug, Clone, Copy)]
+#[repr(C)]
 struct TlbEntry {
     /// The page this entry translates for loads, or [NO_PAGE].
     read: PageIndex,
@@ -58,7 +59,21 @@ pub struct SparseMemory {
     dirty: Vec<PageIndex>,
     /// The translation cache, indexed by the low bits of the page index.
     tlb: Box<[TlbEntry; TLB_ENTRIES]>,
+    /// What compiled code may use to probe [Self::tlb].
+    #[cfg(feature = "jit")]
+    probe: brisc_jit::Probe,
 }
+
+// The layout of the entries is part of the contract with compiled code.
+#[cfg(feature = "jit")]
+const _: () = {
+    assert!(size_of::<TlbEntry>() == brisc_jit::TLB_ENTRY_SIZE as usize);
+    assert!(core::mem::offset_of!(TlbEntry, read) == brisc_jit::TLB_READ_TAG as usize);
+    assert!(core::mem::offset_of!(TlbEntry, write) == brisc_jit::TLB_WRITE_TAG as usize);
+    assert!(core::mem::offset_of!(TlbEntry, frame) == brisc_jit::TLB_FRAME as usize);
+    assert!(TLB_ENTRIES as u64 == brisc_jit::TLB_ENTRIES);
+    assert!(PAGE_SIZE as i64 == brisc_jit::FRAME_SIZE);
+};
 
 impl Default for SparseMemory {
     fn default() -> Self {
@@ -70,13 +85,37 @@ impl SparseMemory {
     /// Creates an empty memory.
     pub fn new() -> Self {
         let tlb = vec![TlbEntry { read: NO_PAGE, write: NO_PAGE, frame: 0 }; TLB_ENTRIES];
-        Self {
+        let memory = Self {
             frames: vec![Frame([0; PAGE_SIZE])],
             pages: HashMap::new(),
             watched: vec![false],
             dirty: Vec::new(),
             tlb: tlb.into_boxed_slice().try_into().expect("the TLB has TLB_ENTRIES entries"),
-        }
+            // SAFETY: It describes nothing and is replaced before it is handed out.
+            #[cfg(feature = "jit")]
+            probe: unsafe { brisc_jit::Probe::new(core::ptr::null(), core::ptr::null_mut()) },
+        };
+        #[cfg(feature = "jit")]
+        let memory = {
+            let mut memory = memory;
+            memory.refresh_probe();
+            memory
+        };
+        memory
+    }
+
+    /// Makes the probe describe the software TLB and the frames where they are now.
+    #[cfg(feature = "jit")]
+    fn refresh_probe(&mut self) {
+        // SAFETY: The software TLB is an array of TLB_ENTRIES entries laid out as the contract
+        // requires, which constants of the compiler are checked against, and the frames are one
+        // contiguous allocation. A hit in the software TLB is an access that load or store
+        // performs in the same way, because they use the same entries and cannot fail: the zero
+        // frame serves reads of pages that are not mapped, and a page that is not mapped or is
+        // watched has no write tag.
+        self.probe = unsafe {
+            brisc_jit::Probe::new(self.tlb.as_ptr().cast(), self.frames.as_mut_ptr().cast())
+        };
     }
 
     /// Returns the number of pages that have been written to or watched.
@@ -96,6 +135,8 @@ impl SparseMemory {
             None if map => {
                 let frame = self.frames.len();
                 self.frames.push(Frame([0; PAGE_SIZE]));
+                #[cfg(feature = "jit")]
+                self.refresh_probe();
                 self.watched.push(false);
                 self.pages.insert(page, frame as u32);
                 frame
@@ -226,6 +267,13 @@ impl Bus for SparseMemory {
 
     fn pop_dirty(&mut self) -> Option<PageIndex> {
         self.dirty.pop()
+    }
+
+    #[cfg(feature = "jit")]
+    fn probe(&mut self) -> Option<*const brisc_jit::Probe> {
+        // A clone has the probe of the original, which describes the original.
+        self.refresh_probe();
+        Some(&self.probe)
     }
 }
 

@@ -13,6 +13,13 @@ use brisc_isa::XWord;
 mod code;
 use code::{slot_of, CodeCache, SLOTS};
 
+#[cfg(feature = "jit")]
+mod jit;
+#[cfg(feature = "jit")]
+pub use jit::{Compilation, JitConfig, JitStats};
+#[cfg(all(test, feature = "jit"))]
+mod jit_test;
+
 mod exec;
 use exec::{execute, Exit};
 
@@ -52,6 +59,8 @@ pub struct Cpu {
     #[cfg(feature = "a")]
     reservation: Option<Address>,
     code: CodeCache,
+    #[cfg(feature = "jit")]
+    jit: jit::JitState,
 }
 
 impl Cpu {
@@ -64,6 +73,8 @@ impl Cpu {
             #[cfg(feature = "a")]
             reservation: None,
             code: CodeCache::default(),
+            #[cfg(feature = "jit")]
+            jit: jit::JitState::new(),
         }
     }
 
@@ -77,7 +88,12 @@ impl Cpu {
 
         let stop = loop {
             while let Some(page) = bus.pop_dirty() {
-                self.code.invalidate(page);
+                #[allow(unused_variables)]
+                let position = self.code.invalidate(page);
+                #[cfg(feature = "jit")]
+                if let Some(position) = position {
+                    self.jit.invalidate(position);
+                }
             }
             if remaining == 0 {
                 break Stop::Budget;
@@ -89,28 +105,33 @@ impl Cpu {
             let code = &self.code.pages[position];
             let base = page_base(page);
 
-            let (exit, pc) = if remaining >= SLOTS as u64 {
-                execute::<B, false>(
-                    &mut self.registers,
-                    #[cfg(feature = "a")]
-                    &mut self.reservation,
-                    bus,
-                    code,
-                    base,
-                    slot,
-                    &mut remaining,
-                )
-            } else {
-                execute::<B, true>(
-                    &mut self.registers,
-                    #[cfg(feature = "a")]
-                    &mut self.reservation,
-                    bus,
-                    code,
-                    base,
-                    slot,
-                    &mut remaining,
-                )
+            #[cfg(feature = "jit")]
+            let jit = self.jit.enabled();
+            #[cfg(not(feature = "jit"))]
+            let jit = false;
+            macro_rules! run {
+                ($precise:literal, $jit:literal) => {
+                    execute::<B, $precise, $jit>(
+                        &mut self.registers,
+                        #[cfg(feature = "a")]
+                        &mut self.reservation,
+                        bus,
+                        code,
+                        #[cfg(feature = "jit")]
+                        &mut self.code.counters[position],
+                        #[cfg(feature = "jit")]
+                        self.jit.threshold(),
+                        base,
+                        slot,
+                        &mut remaining,
+                    )
+                };
+            }
+            let (exit, pc) = match (remaining >= SLOTS as u64, jit) {
+                (true, false) => run!(false, false),
+                (true, true) => run!(false, true),
+                (false, false) => run!(true, false),
+                (false, true) => run!(true, true),
             };
             self.pc = pc;
 
@@ -131,6 +152,8 @@ impl Cpu {
                 #[cfg(feature = "a")]
                 Exit::Fault(fault) => break Stop::Fault(fault),
                 Exit::Bus(error) => break Stop::Bus(error),
+                #[cfg(feature = "jit")]
+                Exit::Hot => self.enter_region(bus, page, position, slot_of(pc), &mut remaining),
             }
         };
 

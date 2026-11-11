@@ -6,7 +6,8 @@ edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
 publish = false
 
 [lints]
@@ -15,6 +16,7 @@ workspace = true
 [dependencies]
 # Local
 brisc-isa.workspace = true
+brisc-jit = { workspace = true, optional = true }
 
 # External
 thiserror.workspace = true
@@ -31,3 +33,6 @@ default = [ "64-bit", "a", "c", "m" ]
 m = [ "brisc-isa/m" ]
 a = [ "brisc-isa/a" ]
 c = [ "brisc-isa/c" ]
+
+# A JIT compiler for hot loops. It needs the standard library and 64-bit registers.
+jit = [ "64-bit", "dep:brisc-jit" ]
