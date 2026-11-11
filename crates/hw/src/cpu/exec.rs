@@ -102,7 +102,7 @@ macro_rules! codes {
     ($length:literal, $($name:ident)+) => {
         $(
             pub(super) const $name: u8 =
-                $crate::cpu::op::Op::code(brisc_isa::Opcode::$name, $length);
+                $crate::cpu::op::Op::code_for(brisc_isa::Opcode::$name, $length);
         )+
     };
 }
@@ -159,17 +159,17 @@ pub(super) fn execute<B: Bus, const PRECISE: bool>(
 
         macro_rules! rs1 {
             () => {
-                r[Registers::slot(op.rs1)]
+                r[op.rs1()]
             };
         }
         macro_rules! rs2 {
             () => {
-                r[Registers::slot(op.rs2)]
+                r[op.rs2()]
             };
         }
         macro_rules! imm {
             () => {
-                op.imm as SXWord as XWord
+                op.imm() as SXWord as XWord
             };
         }
         macro_rules! address {
@@ -181,7 +181,7 @@ pub(super) fn execute<B: Bus, const PRECISE: bool>(
         macro_rules! set {
             ($advance:ident, $value:expr) => {{
                 let value: XWord = $value;
-                r[Registers::slot(op.rd)] = value;
+                r[op.rd()] = value;
                 slot += $advance;
             }};
         }
@@ -223,7 +223,7 @@ pub(super) fn execute<B: Bus, const PRECISE: bool>(
         macro_rules! branch {
             ($advance:ident, $taken:expr) => {{
                 if $taken {
-                    let target = slot.wrapping_add_signed((op.imm >> 1) as isize);
+                    let target = slot.wrapping_add_signed((op.imm() >> 1) as isize);
                     if target >= SLOTS {
                         break (Exit::Leave, pc!().wrapping_add(imm!()));
                     }
@@ -238,7 +238,7 @@ pub(super) fn execute<B: Bus, const PRECISE: bool>(
         macro_rules! jump {
             ($advance:ident, $target:expr) => {{
                 let target: XWord = $target;
-                r[Registers::slot(op.rd)] = pc!().wrapping_add(($advance as XWord) << 1);
+                r[op.rd()] = pc!().wrapping_add(($advance as XWord) << 1);
                 if page_index(target) != page_index(base) {
                     break (Exit::Leave, target);
                 }
@@ -264,10 +264,10 @@ pub(super) fn execute<B: Bus, const PRECISE: bool>(
             }};
         }
 
-        dispatch!(op.code, advance, {
+        dispatch!(op.code(), advance, {
             code::DECODE => { n += 1; break (Exit::Decode, pc!()); }
             code::PAGE_END => { n += 1; break (Exit::Leave, pc!()); }
-            code::ILLEGAL => { n += 1; break (Exit::Illegal(op.imm as Word), pc!()); }
+            code::ILLEGAL => { n += 1; break (Exit::Illegal(op.imm() as Word), pc!()); }
         }, {
             Ecall => { break (Exit::Ecall, pc!()); }
 
@@ -289,10 +289,10 @@ pub(super) fn execute<B: Bus, const PRECISE: bool>(
             Xori => { set!(advance, rs1!() ^ imm!()) }
             Ori => { set!(advance, rs1!() | imm!()) }
             Andi => { set!(advance, rs1!() & imm!()) }
-            Slli => { set!(advance, rs1!().wrapping_shl(op.imm as u32)) }
-            Srli => { set!(advance, rs1!().wrapping_shr(op.imm as u32)) }
-            Srai => { set!(advance, (rs1!() as SXWord).wrapping_shr(op.imm as u32) as XWord) }
-            Slti => { set!(advance, ((rs1!() as SXWord) < (op.imm as SXWord)) as XWord) }
+            Slli => { set!(advance, rs1!().wrapping_shl(op.imm() as u32)) }
+            Srli => { set!(advance, rs1!().wrapping_shr(op.imm() as u32)) }
+            Srai => { set!(advance, (rs1!() as SXWord).wrapping_shr(op.imm() as u32) as XWord) }
+            Slti => { set!(advance, ((rs1!() as SXWord) < (op.imm() as SXWord)) as XWord) }
             Sltiu => { set!(advance, (rs1!() < imm!()) as XWord) }
 
             Lb => { load!(advance, i8) }
@@ -332,13 +332,13 @@ pub(super) fn execute<B: Bus, const PRECISE: bool>(
             #[cfg(feature = "64-bit")]
             Sraw => { set_word!(advance, (rs1!() as i32).wrapping_shr(rs2!() as u32) as Word) }
             #[cfg(feature = "64-bit")]
-            Addiw => { set_word!(advance, (rs1!() as Word).wrapping_add(op.imm as Word)) }
+            Addiw => { set_word!(advance, (rs1!() as Word).wrapping_add(op.imm() as Word)) }
             #[cfg(feature = "64-bit")]
-            Slliw => { set_word!(advance, (rs1!() as Word).wrapping_shl(op.imm as u32)) }
+            Slliw => { set_word!(advance, (rs1!() as Word).wrapping_shl(op.imm() as u32)) }
             #[cfg(feature = "64-bit")]
-            Srliw => { set_word!(advance, (rs1!() as Word).wrapping_shr(op.imm as u32)) }
+            Srliw => { set_word!(advance, (rs1!() as Word).wrapping_shr(op.imm() as u32)) }
             #[cfg(feature = "64-bit")]
-            Sraiw => { set_word!(advance, (rs1!() as i32).wrapping_shr(op.imm as u32) as Word) }
+            Sraiw => { set_word!(advance, (rs1!() as i32).wrapping_shr(op.imm() as u32) as Word) }
 
             #[cfg(feature = "m")]
             Mul => { set!(advance, rs1!().wrapping_mul(rs2!())) }
@@ -443,8 +443,8 @@ fn atomic<B: Bus>(
     use Opcode::*;
 
     let opcode = op.opcode();
-    let address = r[Registers::slot(op.rs1)];
-    let source = r[Registers::slot(op.rs2)];
+    let address = r[op.rs1()];
+    let source = r[op.rs2()];
     // The access is a word, or else a doubleword.
     let word = matches!(
         opcode,
@@ -512,6 +512,6 @@ fn atomic<B: Bus>(
         }
     };
 
-    r[Registers::slot(op.rd)] = result;
+    r[op.rd()] = result;
     Ok(watched)
 }

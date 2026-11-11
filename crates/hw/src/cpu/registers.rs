@@ -12,8 +12,8 @@ pub struct Registers(pub(super) [XWord; Self::LEN]);
 impl Registers {
     /// The number of slots in the file.
     ///
-    /// Slots 0 to 31 hold `x0` to `x31`. The length is a power of two so that an index passed
-    /// through [Registers::slot] is always in bounds without a check.
+    /// Slots 0 to 31 hold `x0` to `x31`. The length is a power of two so that an index masked
+    /// with `LEN - 1` is always in bounds without a check.
     pub(super) const LEN: usize = 64;
 
     /// The slot that receives writes to `x0`.
@@ -25,12 +25,6 @@ impl Registers {
     /// Creates a register file with every register zeroed.
     pub(super) const fn new() -> Self {
         Self([0; Self::LEN])
-    }
-
-    /// Returns the position of register `index` in the file.
-    #[inline(always)]
-    pub(super) const fn slot(index: u8) -> usize {
-        index as usize & (Self::LEN - 1)
     }
 
     /// Returns the value of register `index`.

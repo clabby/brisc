@@ -68,7 +68,7 @@ impl CodeCache {
         bus.watch(page);
 
         let mut slot = first;
-        while slot < SLOTS && self.pages[position][slot].code == code::DECODE {
+        while slot < SLOTS && self.pages[position][slot].code() == code::DECODE {
             let address = page_base(page).wrapping_add((slot as Address) << 1);
             let word = match bus.fetch(address) {
                 Ok(word) => word,

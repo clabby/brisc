@@ -9,21 +9,13 @@ use brisc_isa::{Instruction, Opcode, Word};
 /// The length of the instruction is part of [Op::code], so that every arm of the interpreter's
 /// dispatch knows statically how far to advance and the address of the next [Op] never depends
 /// on the contents of the current one.
+///
+/// The fields share one 64-bit word, which the interpreter loads once and takes apart with
+/// shifts: the code in bits 0 to 7, the destination register in bits 8 to 15, the first source
+/// register in bits 16 to 23, the second in bits 24 to 31 and the immediate in bits 32 to 63.
 #[derive(Debug, Clone, Copy)]
 #[repr(C, align(8))]
-pub(super) struct Op {
-    /// What the interpreter does: one of the constants in [code], or the [Op::code] of an
-    /// [Opcode] and a length.
-    pub(super) code: u8,
-    /// The destination register, with `x0` replaced by [Registers::SINK].
-    pub(super) rd: u8,
-    /// The first source register.
-    pub(super) rs1: u8,
-    /// The second source register.
-    pub(super) rs2: u8,
-    /// The immediate, as in [Instruction::imm].
-    pub(super) imm: i32,
-}
+pub(super) struct Op(u64);
 
 // Eight bytes with eight-byte alignment: a slot never straddles two cache lines.
 const _: () = assert!(size_of::<Op>() == 8 && align_of::<Op>() == 8);
@@ -61,30 +53,71 @@ impl Op {
     pub(super) const PAGE_END: Self = Self::bare(code::PAGE_END);
 
     const fn bare(code: u8) -> Self {
-        Self { code, rd: 0, rs1: 0, rs2: 0, imm: 0 }
+        Self::pack(code, 0, 0, 0, 0)
+    }
+
+    const fn pack(code: u8, rd: u8, rs1: u8, rs2: u8, imm: i32) -> Self {
+        Self(
+            code as u64 |
+                (rd as u64) << 8 |
+                (rs1 as u64) << 16 |
+                (rs2 as u64) << 24 |
+                (imm as u32 as u64) << 32,
+        )
     }
 
     /// A slot whose `word` is not an instruction the hart can execute. The word is kept in the
     /// immediate, for [decode] to say what is wrong with it.
     pub(super) const fn illegal(word: Word) -> Self {
-        Self { imm: word as i32, ..Self::bare(code::ILLEGAL) }
+        Self::pack(code::ILLEGAL, 0, 0, 0, word as i32)
     }
 
     /// Returns the [Op::code] of an instruction with this opcode that is `length` bytes long.
-    pub(super) const fn code(opcode: Opcode, length: u8) -> u8 {
+    pub(super) const fn code_for(opcode: Opcode, length: u8) -> u8 {
         let wide = if length == 4 { code::WIDE } else { 0 };
         (code::FIRST_OPCODE + opcode as u8) | wide
     }
 
     /// Packs `instruction`.
     pub(super) const fn new(instruction: Instruction) -> Self {
-        Self {
-            code: Self::code(instruction.opcode, instruction.length),
-            rd: if instruction.rd == 0 { Registers::SINK } else { instruction.rd },
-            rs1: instruction.rs1,
-            rs2: instruction.rs2,
-            imm: instruction.imm,
-        }
+        Self::pack(
+            Self::code_for(instruction.opcode, instruction.length),
+            if instruction.rd == 0 { Registers::SINK } else { instruction.rd },
+            instruction.rs1,
+            instruction.rs2,
+            instruction.imm,
+        )
+    }
+
+    /// Returns what the interpreter does: one of the constants in [code], or the code of an
+    /// [Opcode] and a length.
+    #[inline(always)]
+    pub(super) const fn code(self) -> u8 {
+        self.0 as u8
+    }
+
+    /// Returns the position in the register file of the destination register.
+    #[inline(always)]
+    pub(super) const fn rd(self) -> usize {
+        (self.0 >> 8) as usize & (Registers::LEN - 1)
+    }
+
+    /// Returns the position in the register file of the first source register.
+    #[inline(always)]
+    pub(super) const fn rs1(self) -> usize {
+        (self.0 >> 16) as usize & (Registers::LEN - 1)
+    }
+
+    /// Returns the position in the register file of the second source register.
+    #[inline(always)]
+    pub(super) const fn rs2(self) -> usize {
+        (self.0 >> 24) as usize & (Registers::LEN - 1)
+    }
+
+    /// Returns the immediate, as in [Instruction::imm].
+    #[inline(always)]
+    pub(super) const fn imm(self) -> i32 {
+        (self.0 >> 32) as i32
     }
 
     /// Returns the opcode of the instruction.
@@ -94,7 +127,7 @@ impl Op {
     /// Panics if the [Op] does not stand for an instruction.
     #[cfg(feature = "a")]
     pub(super) const fn opcode(self) -> Opcode {
-        Opcode::ALL[((self.code & !code::WIDE) - code::FIRST_OPCODE) as usize]
+        Opcode::ALL[((self.code() & !code::WIDE) - code::FIRST_OPCODE) as usize]
     }
 }
 
