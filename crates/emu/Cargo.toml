@@ -8,6 +8,7 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 publish = false
+autobenches = false
 
 [lints]
 workspace = true
@@ -47,3 +48,4 @@ c = [ "brisc-hw/c" ]
 harness = false
 name = "emu"
 path = "benches/bench.rs"
+required-features = [ "test-utils" ]

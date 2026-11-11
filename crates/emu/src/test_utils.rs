@@ -41,41 +41,52 @@ macro_rules! test_suites {
     }
 }
 
-/// Helper function to run a single test case
-pub fn run_riscv_test(test_path: &PathBuf) -> f64 {
-    // Load the program
-    let elf_bytes = fs::read(test_path).unwrap();
-    let mut hart = StEmu::<TestStEmuConfig>::builder()
-        .with_kernel(RiscvTestKernel)
-        .with_ctx(())
-        .with_elf(&elf_bytes)
-        .unwrap()
-        .build();
+/// A RISC-V test program loaded into an emulator.
+#[derive(Debug)]
+pub struct TestProgram(StEmu<'static, TestStEmuConfig>);
 
-    // Run the program until it exits
-    let mut clock = 0;
-    let now = std::time::Instant::now();
-    while !hart.register.exit {
-        hart.cycle().unwrap();
-        clock += 1;
+impl TestProgram {
+    /// Loads the ELF file `elf` into a fresh emulator.
+    pub fn load(elf: &[u8]) -> Self {
+        Self(
+            StEmu::<TestStEmuConfig>::builder()
+                .with_kernel(RiscvTestKernel)
+                .with_ctx(())
+                .with_elf(elf)
+                .unwrap()
+                .build(),
+        )
     }
 
-    let ips = clock as f64 / now.elapsed().as_secs_f64();
-    tracing::info!(target: "test-runner", "ips: {ips}");
+    /// Runs the program until it exits and returns the number of instructions it retired.
+    ///
+    /// ## Panics
+    ///
+    /// Panics if the program exits with a non-zero exit code.
+    pub fn run(mut self) -> u64 {
+        let mut instructions = 0;
+        while !self.0.register.exit {
+            self.0.cycle().unwrap();
+            instructions += 1;
+        }
 
-    // Check the exit code
-    assert_eq!(
-        hart.register.exit_code,
-        0,
-        "Test failed: {:?} | Failing Test #: {} | clock: {clock}",
-        test_path.file_name().unwrap(),
-        hart.register.exit_code >> 1,
-    );
-
-    ips
+        let exit_code = self.0.register.exit_code;
+        assert_eq!(
+            exit_code,
+            0,
+            "Test failed | Failing Test #: {} | instructions: {instructions}",
+            exit_code >> 1,
+        );
+        instructions
+    }
 }
 
-#[derive(Default)]
+/// Runs the test program at `test_path` and returns the number of instructions it retired.
+pub fn run_riscv_test(test_path: &PathBuf) -> u64 {
+    TestProgram::load(&fs::read(test_path).unwrap()).run()
+}
+
+#[derive(Default, Debug)]
 struct TestStEmuConfig;
 
 impl EmuConfig<'_> for TestStEmuConfig {
