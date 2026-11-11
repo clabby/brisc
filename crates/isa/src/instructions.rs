@@ -243,6 +243,18 @@ mod test {
     use crate::sign_extend;
 
     #[test]
+    fn all_zero_parcels_are_illegal() {
+        assert!(Instruction::try_from(0x0000).is_err());
+        assert!(Instruction::try_from(0x0000_0000).is_err());
+
+        // A zero immediate is reserved for `c.addi4spn` whichever register it names.
+        #[cfg(feature = "c")]
+        assert!(Instruction::try_from(0b000_00000000_001_00).is_err());
+        #[cfg(feature = "c")]
+        assert!(Instruction::try_from(0b000_00000001_001_00).is_ok());
+    }
+
+    #[test]
     fn test_static_instruction_decode() {
         let raw: Word = 0b111111000000_01010_000_10101_0010011;
         let instruction = Instruction::try_from(raw).unwrap();

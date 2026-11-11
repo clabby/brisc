@@ -131,25 +131,35 @@ where
 
 #[cfg(test)]
 mod test {
+    use super::*;
     use crate::test_suites;
+    use brisc_hw::memory::SparseMemory;
+
+    /// A configuration whose guest makes no system calls other than the one that ends a test.
+    struct NoKernel;
+
+    impl EmuConfig<'_> for NoKernel {
+        type Memory = SparseMemory;
+        type Kernel = ();
+        type Context = ();
+    }
+
+    #[test]
+    fn executing_unmapped_memory_faults() {
+        // Unmapped memory reads as zero, which is not an instruction.
+        let mut emu = StEmu::<NoKernel>::builder()
+            .with_memory(SparseMemory::new())
+            .with_kernel(())
+            .with_ctx(())
+            .build();
+        assert!(matches!(emu.run(), Err(EmulationError::Fault(Fault::Decode(_)))));
+        assert_eq!((emu.cpu.pc, emu.cpu.instret), (0, 0));
+    }
 
     #[test]
     #[cfg(all(feature = "64-bit", feature = "a"))]
     fn lr_w_sign_extends() {
-        use super::*;
-        use brisc_hw::{
-            memory::{Memory, SparseMemory},
-            REG_A0, REG_A1,
-        };
-
-        /// A configuration whose guest makes no system calls other than the one that ends the test.
-        struct NoKernel;
-
-        impl EmuConfig<'_> for NoKernel {
-            type Memory = SparseMemory;
-            type Kernel = ();
-            type Context = ();
-        }
+        use brisc_hw::{memory::Memory, REG_A0, REG_A1};
 
         let mut memory = SparseMemory::new();
         // lr.w a0, (a1)

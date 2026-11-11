@@ -91,7 +91,11 @@ impl C0 {
     pub fn decode(instruction: HalfWord) -> Result<Self, InstructionDecodeError> {
         let funct3 = bits!(u8, instruction, 13..16);
         match funct3 {
-            0b000 => Ok(Self::CAddi4spn(CIWType::decode(instruction))),
+            // A zero immediate is reserved, which makes the all-zero halfword illegal.
+            0b000 => match CIWType::decode(instruction) {
+                CIWType { imm: 0, .. } => Err(InstructionDecodeError::InvalidOpcode(0)),
+                ciw => Ok(Self::CAddi4spn(ciw)),
+            },
             0b010 => Ok(Self::CLw(CLType::decode(instruction))),
             0b110 => Ok(Self::CSw(CSType::decode(instruction))),
             #[cfg(feature = "64-bit")]
