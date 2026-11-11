@@ -14,8 +14,11 @@ pub use errors::InstructionDecodeError;
 mod instructions;
 pub use instructions::*;
 
-mod functions;
-pub use functions::*;
+mod opcode;
+pub use opcode::Opcode;
+
+#[doc(hidden)]
+pub mod legacy;
 
 mod arch;
 pub use arch::*;

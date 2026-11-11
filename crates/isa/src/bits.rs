@@ -13,9 +13,9 @@ macro_rules! twiddle {
         let mut result: $ty = 0;
 
         $(
+            let range: core::ops::Range<usize> = $range;
             let bits = $crate::bits!($ty, $value, $range);
-            let width = $range.end - $range.start;
-            result = (result << width) | bits;
+            result = (result << (range.end - range.start)) | bits;
         )+
 
         result
@@ -29,9 +29,8 @@ macro_rules! twiddle {
 #[macro_export]
 macro_rules! bits {
     ($ty:ty, $value:expr, $range:expr) => {{
-        let (start, width) =
-            (|range: core::ops::Range<usize>| (range.start, range.end - range.start))($range);
-        (($value >> start) & ((1 << width) - 1)) as $ty
+        let range: core::ops::Range<usize> = $range;
+        (($value >> range.start) & ((1 << (range.end - range.start)) - 1)) as $ty
     }};
 }
 

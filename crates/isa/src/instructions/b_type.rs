@@ -1,6 +1,6 @@
-//! Risc-V B-Type instruction
+//! RISC-V B-Type instruction
 
-use crate::{bits, sign_extend, twiddle, Word, XWord};
+use crate::{bits, Word};
 
 /// A RISC-V B-Type instruction.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
@@ -12,17 +12,21 @@ pub struct BType {
     /// The second source register.
     pub rs2: u8,
     /// The sign-extended immediate
-    pub imm: XWord,
+    pub imm: i32,
 }
 
 impl BType {
     /// Decodes an [BType] instruction from a 32-bit [Word].
-    pub fn decode(instruction: Word) -> Self {
+    pub const fn decode(instruction: Word) -> Self {
         Self {
             funct3: bits!(u8, instruction, 12..15),
             rs1: bits!(u8, instruction, 15..20),
             rs2: bits!(u8, instruction, 20..25),
-            imm: sign_extend(twiddle!(XWord, instruction, 31..32, 7..8, 25..31, 8..12) << 1, 12),
+            // imm[12|10:5] | rs2 | rs1 | funct3 | imm[4:1|11] | opcode
+            imm: (instruction as i32 >> 31 << 12) |
+                (bits!(i32, instruction, 7..8) << 11) |
+                (bits!(i32, instruction, 25..31) << 5) |
+                (bits!(i32, instruction, 8..12) << 1),
         }
     }
 }
@@ -50,6 +54,6 @@ mod test {
         assert_eq!(btype.funct3, 0b101);
         assert_eq!(btype.rs1, 0b01010);
         assert_eq!(btype.rs2, 0b11111);
-        assert_eq!(btype.imm, sign_extend(0b1_1_010110_0010 << 1, 12));
+        assert_eq!(btype.imm, (0b1_1_010110_0010 << 1) - (1 << 13));
     }
 }

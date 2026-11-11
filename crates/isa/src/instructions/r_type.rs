@@ -1,6 +1,6 @@
-//! Risc-V R-Type instruction
+//! RISC-V R-Type instruction
 
-use crate::{arch::Word, bits};
+use crate::{bits, Word};
 
 /// A RISC-V R-Type instruction.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,7 +19,7 @@ pub struct RType {
 
 impl RType {
     /// Decodes an [RType] instruction from a 32-bit [Word].
-    pub fn decode(instruction: Word) -> Self {
+    pub const fn decode(instruction: Word) -> Self {
         Self {
             rd: bits!(u8, instruction, 7..12),
             funct3: bits!(u8, instruction, 12..15),

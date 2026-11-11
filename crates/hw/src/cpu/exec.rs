@@ -16,7 +16,7 @@ use super::Fault;
 #[cfg(feature = "a")]
 use crate::memory::Address;
 #[cfg(feature = "a")]
-use brisc_isa::AmoFunction;
+use brisc_isa::legacy::AmoFunction;
 
 #[cfg(feature = "m")]
 use brisc_isa::{DoubleXWord, SDoubleXWord, X_LEN};

@@ -1,6 +1,6 @@
-//! Risc-V S-Type instruction
+//! RISC-V S-Type instruction
 
-use crate::{bits, sign_extend, twiddle, Word, XWord};
+use crate::{bits, Word};
 
 /// A RISC-V S-Type instruction.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
@@ -12,17 +12,18 @@ pub struct SType {
     /// The second source register.
     pub rs2: u8,
     /// The sign-extended immediate
-    pub imm: XWord,
+    pub imm: i32,
 }
 
 impl SType {
     /// Decodes an [SType] instruction from a 32-bit [Word].
-    pub fn decode(instruction: Word) -> Self {
+    pub const fn decode(instruction: Word) -> Self {
         Self {
             funct3: bits!(u8, instruction, 12..15),
             rs1: bits!(u8, instruction, 15..20),
             rs2: bits!(u8, instruction, 20..25),
-            imm: sign_extend(twiddle!(XWord, instruction, 25..32, 7..12), 11),
+            // imm[11:5] | rs2 | rs1 | funct3 | imm[4:0] | opcode
+            imm: (instruction as i32 >> 25 << 5) | bits!(i32, instruction, 7..12),
         }
     }
 }
@@ -50,6 +51,6 @@ mod test {
         assert_eq!(stype.funct3, 0b111);
         assert_eq!(stype.rs1, 0b10101);
         assert_eq!(stype.rs2, 0b00100);
-        assert_eq!(stype.imm, sign_extend(0b111000111000, 11));
+        assert_eq!(stype.imm, 0b111000111000 - (1 << 12));
     }
 }

@@ -5,15 +5,18 @@ use super::{
     Fault, Registers,
 };
 use brisc_isa::{
-    BranchFunction, EnvironmentFunction, ImmediateArithmeticFunction, Instruction, LoadFunction,
-    RegisterArithmeticFunction, StoreFunction, Word, XWord,
+    legacy::{
+        BranchFunction, EnvironmentFunction, ImmediateArithmeticFunction, Instruction,
+        LoadFunction, RegisterArithmeticFunction, StoreFunction,
+    },
+    Word, XWord,
 };
 
 #[cfg(feature = "64-bit")]
-use brisc_isa::{ImmediateArithmeticWordFunction, RegisterArithmeticWordFunction};
+use brisc_isa::legacy::{ImmediateArithmeticWordFunction, RegisterArithmeticWordFunction};
 
 #[cfg(feature = "a")]
-use brisc_isa::AmoFunction;
+use brisc_isa::legacy::AmoFunction;
 
 /// Decodes the instruction in the low bits of `raw`.
 pub(super) fn lower(raw: Word) -> Result<Op, Fault> {

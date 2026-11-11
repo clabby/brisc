@@ -1,6 +1,7 @@
 //! Contains function definitions for the ISA.
 
-use crate::{bits, BType, IType, InstructionDecodeError, RType, SType};
+use super::{BType, IType, RType, SType};
+use crate::{bits, InstructionDecodeError};
 
 /// Functions for Integer Register-Register Instructions.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

@@ -1,6 +1,6 @@
-//! Risc-V J-Type instruction
+//! RISC-V J-Type instruction
 
-use crate::{arch::Word, bits, sign_extend, twiddle, XWord};
+use crate::{bits, Word};
 
 /// A RISC-V J-Type instruction.
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
@@ -8,15 +8,19 @@ pub struct JType {
     /// The destination register.
     pub rd: u8,
     /// The sign-extended immediate
-    pub imm: XWord,
+    pub imm: i32,
 }
 
 impl JType {
     /// Decodes an [JType] instruction from a 32-bit [Word].
-    pub fn decode(instruction: Word) -> Self {
+    pub const fn decode(instruction: Word) -> Self {
         Self {
             rd: bits!(u8, instruction, 7..12),
-            imm: sign_extend(twiddle!(XWord, instruction, 31..32, 12..20, 20..21, 21..31) << 1, 20),
+            // imm[20|10:1|11|19:12] | rd | opcode
+            imm: (instruction as i32 >> 31 << 20) |
+                (bits!(i32, instruction, 12..20) << 12) |
+                (bits!(i32, instruction, 20..21) << 11) |
+                (bits!(i32, instruction, 21..31) << 1),
         }
     }
 }
@@ -40,6 +44,6 @@ mod test {
 
         let jtype = JType::decode(instruction);
         assert_eq!(jtype.rd, 0b11111);
-        assert_eq!(jtype.imm, sign_extend(0b1_00000000_1_0101010101 << 1, 20));
+        assert_eq!(jtype.imm, (0b1_00000000_1_0101010101 << 1) - (1 << 21));
     }
 }
