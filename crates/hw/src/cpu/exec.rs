@@ -1,8 +1,9 @@
 //! The interpreter loop.
 
 use super::{
+    code::{CodePage, SLOTS},
     op::{narrow, wide, Op},
-    CodePage, Registers, SLOTS,
+    Registers,
 };
 use crate::memory::{Memory, PAGE_ADDRESS_MASK, PAGE_ADDRESS_SIZE};
 use brisc_isa::{SXWord, XWord};
@@ -108,12 +109,12 @@ pub(super) fn execute<M: Memory, const PRECISE: bool>(
 
         macro_rules! rs1 {
             () => {
-                r[op.rs1 as usize & 63]
+                r[Registers::slot(op.rs1)]
             };
         }
         macro_rules! rs2 {
             () => {
-                r[op.rs2 as usize & 63]
+                r[Registers::slot(op.rs2)]
             };
         }
         macro_rules! imm {
@@ -130,7 +131,7 @@ pub(super) fn execute<M: Memory, const PRECISE: bool>(
         macro_rules! set {
             ($advance:ident, $value:expr) => {{
                 let value: XWord = $value;
-                r[op.rd as usize & 63] = value;
+                r[Registers::slot(op.rd)] = value;
                 slot += $advance;
             }};
         }
@@ -174,7 +175,7 @@ pub(super) fn execute<M: Memory, const PRECISE: bool>(
         macro_rules! jump {
             ($advance:ident, $target:expr) => {{
                 let target: XWord = $target;
-                r[op.rd as usize & 63] = pc!().wrapping_add(($advance as XWord) << 1);
+                r[Registers::slot(op.rd)] = pc!().wrapping_add(($advance as XWord) << 1);
                 if target >> PAGE_ADDRESS_SIZE != base >> PAGE_ADDRESS_SIZE {
                     break (Exit::Leave, target);
                 }
@@ -366,13 +367,13 @@ pub(super) fn execute<M: Memory, const PRECISE: bool>(
 )]
 fn atomic<M: Memory>(
     function: AmoFunction,
-    r: &mut [XWord; 64],
+    r: &mut [XWord; Registers::LEN],
     reservation: &mut Option<Address>,
     memory: &mut M,
     op: Op,
 ) -> Result<bool, Fault> {
-    let address = r[op.rs1 as usize & 63];
-    let source = r[op.rs2 as usize & 63];
+    let address = r[Registers::slot(op.rs1)];
+    let source = r[Registers::slot(op.rs2)];
     // Lowering only produces sizes of 4 and, on 64-bit, 8 bytes.
     let word = op.imm == 4;
     if address & (op.imm as XWord - 1) != 0 {
@@ -425,6 +426,6 @@ fn atomic<M: Memory>(
         }
     };
 
-    r[op.rd as usize & 63] = result;
+    r[Registers::slot(op.rd)] = result;
     Ok(watched)
 }
