@@ -2,7 +2,7 @@
 
 use super::{
     code::{slot_of, CodePage, SLOTS},
-    op::{narrow, wide, Op},
+    op::{code, Op},
     Registers,
 };
 use crate::memory::{page_index, Memory};
@@ -16,7 +16,7 @@ use super::Fault;
 #[cfg(feature = "a")]
 use crate::memory::Address;
 #[cfg(feature = "a")]
-use brisc_isa::legacy::AmoFunction;
+use brisc_isa::Opcode;
 
 #[cfg(feature = "m")]
 use brisc_isa::{DoubleXWord, SDoubleXWord, X_LEN};
@@ -37,23 +37,72 @@ pub(super) enum Exit {
     Fault(Fault),
 }
 
-/// Matches on an [Op::code], running `$body` for the two-byte and the four-byte form of each
-/// listed opcode with `$advance` bound to the number of slots the instruction occupies.
+/// Matches on an [Op::code].
+///
+/// The first block of arms is for the codes that are not instructions. Each arm of the second
+/// block names one or more variants of [brisc_isa::Opcode] and runs its body for the two-byte
+/// and for the four-byte form of those instructions, with `$advance` bound to the number of
+/// slots the instruction occupies. That number is a constant in each copy of the body, which is
+/// what keeps the address of the next [Op] independent of the current one.
+///
+/// The arms must cover exactly the instructions that the enabled features include.
 macro_rules! dispatch {
-    ($code:expr, $advance:ident, { $($(#[$cfg:meta])* $name:ident => $body:block)* }) => {
+    (
+        $code:expr,
+        $advance:ident,
+        { $($internal:pat => $internal_body:block)* },
+        { $($(#[$cfg:meta])* $($name:ident)|+ => $body:block)* }
+    ) => {{
+        /// The codes of the two-byte instructions.
+        #[allow(non_upper_case_globals)]
+        mod narrow {
+            $($(#[$cfg])* codes!(2, $($name)+);)*
+        }
+
+        /// The codes of the four-byte instructions.
+        #[allow(non_upper_case_globals)]
+        mod wide {
+            $($(#[$cfg])* codes!(4, $($name)+);)*
+        }
+
+        const _: () = {
+            let mut i = 0;
+            while i < brisc_isa::Opcode::ALL.len() {
+                let opcode = brisc_isa::Opcode::ALL[i];
+                let dispatched = match opcode {
+                    $($(#[$cfg])* $(brisc_isa::Opcode::$name)|+ => true,)*
+                    #[allow(unreachable_patterns)]
+                    _ => false,
+                };
+                assert!(dispatched == opcode.is_supported());
+                i += 1;
+            }
+        };
+
         match $code {
-            $($(#[$cfg])* narrow::$name => {
+            $($internal => $internal_body)*
+            $($(#[$cfg])* $(narrow::$name)|+ => {
                 #[allow(unused_variables)]
                 let $advance: usize = 1;
                 $body
             })*
-            $($(#[$cfg])* wide::$name => {
+            $($(#[$cfg])* $(wide::$name)|+ => {
                 #[allow(unused_variables)]
                 let $advance: usize = 2;
                 $body
             })*
-            _ => unreachable!("slots only hold opcodes produced by lowering"),
+            _ => unreachable!("slots only hold the codes of instructions that decode"),
         }
+    }};
+}
+
+/// Defines a constant with the [Op::code] of each of the named instructions at this length.
+macro_rules! codes {
+    ($length:literal, $($name:ident)+) => {
+        $(
+            pub(super) const $name: u8 =
+                $crate::cpu::op::Op::code(brisc_isa::Opcode::$name, $length);
+        )+
     };
 }
 
@@ -185,8 +234,8 @@ pub(super) fn execute<M: Memory, const PRECISE: bool>(
         }
         #[cfg(feature = "a")]
         macro_rules! atomic {
-            ($advance:ident, $function:expr) => {{
-                match atomic($function, r, reservation, memory, op) {
+            ($advance:ident) => {{
+                match atomic(r, reservation, memory, op) {
                     Ok(watched) => {
                         slot += $advance;
                         if watched {
@@ -202,154 +251,154 @@ pub(super) fn execute<M: Memory, const PRECISE: bool>(
         }
 
         dispatch!(op.code, advance, {
-            DECODE => { n += 1; break (Exit::Decode, pc!()); }
-            PAGE_END => { n += 1; break (Exit::Leave, pc!()); }
-            ILLEGAL => { n += 1; break (Exit::Illegal, pc!()); }
-            ECALL => { break (Exit::Ecall, pc!()); }
+            code::DECODE => { n += 1; break (Exit::Decode, pc!()); }
+            code::PAGE_END => { n += 1; break (Exit::Leave, pc!()); }
+            code::ILLEGAL => { n += 1; break (Exit::Illegal, pc!()); }
+        }, {
+            Ecall => { break (Exit::Ecall, pc!()); }
 
-            LI => { set!(advance, imm!()) }
-            AUIPC => { set!(advance, pc!().wrapping_add(imm!())) }
+            Lui => { set!(advance, imm!()) }
+            Auipc => { set!(advance, pc!().wrapping_add(imm!())) }
 
-            ADD => { set!(advance, rs1!().wrapping_add(rs2!())) }
-            SUB => { set!(advance, rs1!().wrapping_sub(rs2!())) }
-            XOR => { set!(advance, rs1!() ^ rs2!()) }
-            OR => { set!(advance, rs1!() | rs2!()) }
-            AND => { set!(advance, rs1!() & rs2!()) }
-            SLL => { set!(advance, rs1!().wrapping_shl(rs2!() as u32)) }
-            SRL => { set!(advance, rs1!().wrapping_shr(rs2!() as u32)) }
-            SRA => { set!(advance, (rs1!() as SXWord).wrapping_shr(rs2!() as u32) as XWord) }
-            SLT => { set!(advance, ((rs1!() as SXWord) < (rs2!() as SXWord)) as XWord) }
-            SLTU => { set!(advance, (rs1!() < rs2!()) as XWord) }
+            Add => { set!(advance, rs1!().wrapping_add(rs2!())) }
+            Sub => { set!(advance, rs1!().wrapping_sub(rs2!())) }
+            Xor => { set!(advance, rs1!() ^ rs2!()) }
+            Or => { set!(advance, rs1!() | rs2!()) }
+            And => { set!(advance, rs1!() & rs2!()) }
+            Sll => { set!(advance, rs1!().wrapping_shl(rs2!() as u32)) }
+            Srl => { set!(advance, rs1!().wrapping_shr(rs2!() as u32)) }
+            Sra => { set!(advance, (rs1!() as SXWord).wrapping_shr(rs2!() as u32) as XWord) }
+            Slt => { set!(advance, ((rs1!() as SXWord) < (rs2!() as SXWord)) as XWord) }
+            Sltu => { set!(advance, (rs1!() < rs2!()) as XWord) }
 
-            ADDI => { set!(advance, rs1!().wrapping_add(imm!())) }
-            XORI => { set!(advance, rs1!() ^ imm!()) }
-            ORI => { set!(advance, rs1!() | imm!()) }
-            ANDI => { set!(advance, rs1!() & imm!()) }
-            SLLI => { set!(advance, rs1!().wrapping_shl(op.imm as u32)) }
-            SRLI => { set!(advance, rs1!().wrapping_shr(op.imm as u32)) }
-            SRAI => { set!(advance, (rs1!() as SXWord).wrapping_shr(op.imm as u32) as XWord) }
-            SLTI => { set!(advance, ((rs1!() as SXWord) < (op.imm as SXWord)) as XWord) }
-            SLTIU => { set!(advance, (rs1!() < imm!()) as XWord) }
+            Addi => { set!(advance, rs1!().wrapping_add(imm!())) }
+            Xori => { set!(advance, rs1!() ^ imm!()) }
+            Ori => { set!(advance, rs1!() | imm!()) }
+            Andi => { set!(advance, rs1!() & imm!()) }
+            Slli => { set!(advance, rs1!().wrapping_shl(op.imm as u32)) }
+            Srli => { set!(advance, rs1!().wrapping_shr(op.imm as u32)) }
+            Srai => { set!(advance, (rs1!() as SXWord).wrapping_shr(op.imm as u32) as XWord) }
+            Slti => { set!(advance, ((rs1!() as SXWord) < (op.imm as SXWord)) as XWord) }
+            Sltiu => { set!(advance, (rs1!() < imm!()) as XWord) }
 
-            LB => { load!(advance, i8) }
-            LH => { load!(advance, i16) }
-            LW => { load!(advance, i32) }
-            LBU => { load!(advance, u8) }
-            LHU => { load!(advance, u16) }
+            Lb => { load!(advance, i8) }
+            Lh => { load!(advance, i16) }
+            Lw => { load!(advance, i32) }
+            Lbu => { load!(advance, u8) }
+            Lhu => { load!(advance, u16) }
             #[cfg(feature = "64-bit")]
-            LWU => { load!(advance, u32) }
+            Lwu => { load!(advance, u32) }
             #[cfg(feature = "64-bit")]
-            LD => { load!(advance, u64) }
+            Ld => { load!(advance, u64) }
 
-            SB => { store!(advance, u8) }
-            SH => { store!(advance, u16) }
-            SW => { store!(advance, u32) }
+            Sb => { store!(advance, u8) }
+            Sh => { store!(advance, u16) }
+            Sw => { store!(advance, u32) }
             #[cfg(feature = "64-bit")]
-            SD => { store!(advance, u64) }
+            Sd => { store!(advance, u64) }
 
-            BEQ => { branch!(advance, rs1!() == rs2!()) }
-            BNE => { branch!(advance, rs1!() != rs2!()) }
-            BLT => { branch!(advance, (rs1!() as SXWord) < (rs2!() as SXWord)) }
-            BGE => { branch!(advance, (rs1!() as SXWord) >= (rs2!() as SXWord)) }
-            BLTU => { branch!(advance, rs1!() < rs2!()) }
-            BGEU => { branch!(advance, rs1!() >= rs2!()) }
+            Beq => { branch!(advance, rs1!() == rs2!()) }
+            Bne => { branch!(advance, rs1!() != rs2!()) }
+            Blt => { branch!(advance, (rs1!() as SXWord) < (rs2!() as SXWord)) }
+            Bge => { branch!(advance, (rs1!() as SXWord) >= (rs2!() as SXWord)) }
+            Bltu => { branch!(advance, rs1!() < rs2!()) }
+            Bgeu => { branch!(advance, rs1!() >= rs2!()) }
 
-            JAL => { jump!(advance, pc!().wrapping_add(imm!())) }
-            JALR => { jump!(advance, address!() & !1) }
+            Jal => { jump!(advance, pc!().wrapping_add(imm!())) }
+            Jalr => { jump!(advance, address!() & !1) }
 
             #[cfg(feature = "64-bit")]
-            ADDW => { set_word!(advance, (rs1!() as Word).wrapping_add(rs2!() as Word)) }
+            Addw => { set_word!(advance, (rs1!() as Word).wrapping_add(rs2!() as Word)) }
             #[cfg(feature = "64-bit")]
-            SUBW => { set_word!(advance, (rs1!() as Word).wrapping_sub(rs2!() as Word)) }
+            Subw => { set_word!(advance, (rs1!() as Word).wrapping_sub(rs2!() as Word)) }
             #[cfg(feature = "64-bit")]
-            SLLW => { set_word!(advance, (rs1!() as Word).wrapping_shl(rs2!() as u32)) }
+            Sllw => { set_word!(advance, (rs1!() as Word).wrapping_shl(rs2!() as u32)) }
             #[cfg(feature = "64-bit")]
-            SRLW => { set_word!(advance, (rs1!() as Word).wrapping_shr(rs2!() as u32)) }
+            Srlw => { set_word!(advance, (rs1!() as Word).wrapping_shr(rs2!() as u32)) }
             #[cfg(feature = "64-bit")]
-            SRAW => { set_word!(advance, (rs1!() as i32).wrapping_shr(rs2!() as u32) as Word) }
+            Sraw => { set_word!(advance, (rs1!() as i32).wrapping_shr(rs2!() as u32) as Word) }
             #[cfg(feature = "64-bit")]
-            ADDIW => { set_word!(advance, (rs1!() as Word).wrapping_add(op.imm as Word)) }
+            Addiw => { set_word!(advance, (rs1!() as Word).wrapping_add(op.imm as Word)) }
             #[cfg(feature = "64-bit")]
-            SLLIW => { set_word!(advance, (rs1!() as Word).wrapping_shl(op.imm as u32)) }
+            Slliw => { set_word!(advance, (rs1!() as Word).wrapping_shl(op.imm as u32)) }
             #[cfg(feature = "64-bit")]
-            SRLIW => { set_word!(advance, (rs1!() as Word).wrapping_shr(op.imm as u32)) }
+            Srliw => { set_word!(advance, (rs1!() as Word).wrapping_shr(op.imm as u32)) }
             #[cfg(feature = "64-bit")]
-            SRAIW => { set_word!(advance, (rs1!() as i32).wrapping_shr(op.imm as u32) as Word) }
+            Sraiw => { set_word!(advance, (rs1!() as i32).wrapping_shr(op.imm as u32) as Word) }
 
             #[cfg(feature = "m")]
-            MUL => { set!(advance, rs1!().wrapping_mul(rs2!())) }
+            Mul => { set!(advance, rs1!().wrapping_mul(rs2!())) }
             #[cfg(feature = "m")]
-            MULH => {
+            Mulh => {
                 let product = (rs1!() as SXWord as SDoubleXWord) * (rs2!() as SXWord as SDoubleXWord);
                 set!(advance, (product >> X_LEN) as XWord)
             }
             #[cfg(feature = "m")]
-            MULHSU => {
+            Mulhsu => {
                 let product = (rs1!() as SXWord as SDoubleXWord)
                     .wrapping_mul(rs2!() as DoubleXWord as SDoubleXWord);
                 set!(advance, (product >> X_LEN) as XWord)
             }
             #[cfg(feature = "m")]
-            MULHU => {
+            Mulhu => {
                 let product = (rs1!() as DoubleXWord) * (rs2!() as DoubleXWord);
                 set!(advance, (product >> X_LEN) as XWord)
             }
             // Division by zero and signed overflow do not trap: they produce the results the
             // M extension defines for them.
             #[cfg(feature = "m")]
-            DIV => {
+            Div => {
                 let (dividend, divisor) = (rs1!() as SXWord, rs2!() as SXWord);
                 set!(advance, if divisor == 0 { XWord::MAX } else { dividend.wrapping_div(divisor) as XWord })
             }
             #[cfg(feature = "m")]
-            DIVU => { set!(advance, rs1!().checked_div(rs2!()).unwrap_or(XWord::MAX)) }
+            Divu => { set!(advance, rs1!().checked_div(rs2!()).unwrap_or(XWord::MAX)) }
             #[cfg(feature = "m")]
-            REM => {
+            Rem => {
                 let (dividend, divisor) = (rs1!() as SXWord, rs2!() as SXWord);
                 set!(advance, if divisor == 0 { dividend as XWord } else { dividend.wrapping_rem(divisor) as XWord })
             }
             #[cfg(feature = "m")]
-            REMU => { set!(advance, rs1!().checked_rem(rs2!()).unwrap_or(rs1!())) }
+            Remu => { set!(advance, rs1!().checked_rem(rs2!()).unwrap_or(rs1!())) }
 
             #[cfg(all(feature = "64-bit", feature = "m"))]
-            MULW => { set_word!(advance, (rs1!() as Word).wrapping_mul(rs2!() as Word)) }
+            Mulw => { set_word!(advance, (rs1!() as Word).wrapping_mul(rs2!() as Word)) }
             #[cfg(all(feature = "64-bit", feature = "m"))]
-            DIVW => {
+            Divw => {
                 let (dividend, divisor) = (rs1!() as i32, rs2!() as i32);
                 set_word!(advance, if divisor == 0 { Word::MAX } else { dividend.wrapping_div(divisor) as Word })
             }
             #[cfg(all(feature = "64-bit", feature = "m"))]
-            DIVUW => { set_word!(advance, (rs1!() as Word).checked_div(rs2!() as Word).unwrap_or(Word::MAX)) }
+            Divuw => { set_word!(advance, (rs1!() as Word).checked_div(rs2!() as Word).unwrap_or(Word::MAX)) }
             #[cfg(all(feature = "64-bit", feature = "m"))]
-            REMW => {
+            Remw => {
                 let (dividend, divisor) = (rs1!() as i32, rs2!() as i32);
                 set_word!(advance, if divisor == 0 { dividend as Word } else { dividend.wrapping_rem(divisor) as Word })
             }
             #[cfg(all(feature = "64-bit", feature = "m"))]
-            REMUW => { set_word!(advance, (rs1!() as Word).checked_rem(rs2!() as Word).unwrap_or(rs1!() as Word)) }
+            Remuw => { set_word!(advance, (rs1!() as Word).checked_rem(rs2!() as Word).unwrap_or(rs1!() as Word)) }
 
             #[cfg(feature = "a")]
-            LR => { atomic!(advance, AmoFunction::Lr) }
-            #[cfg(feature = "a")]
-            SC => { atomic!(advance, AmoFunction::Sc) }
-            #[cfg(feature = "a")]
-            AMOSWAP => { atomic!(advance, AmoFunction::Amoswap) }
-            #[cfg(feature = "a")]
-            AMOADD => { atomic!(advance, AmoFunction::Amoadd) }
-            #[cfg(feature = "a")]
-            AMOXOR => { atomic!(advance, AmoFunction::Amoxor) }
-            #[cfg(feature = "a")]
-            AMOAND => { atomic!(advance, AmoFunction::Amoand) }
-            #[cfg(feature = "a")]
-            AMOOR => { atomic!(advance, AmoFunction::Amoor) }
-            #[cfg(feature = "a")]
-            AMOMIN => { atomic!(advance, AmoFunction::Amomin) }
-            #[cfg(feature = "a")]
-            AMOMAX => { atomic!(advance, AmoFunction::Amomax) }
-            #[cfg(feature = "a")]
-            AMOMINU => { atomic!(advance, AmoFunction::Amominu) }
-            #[cfg(feature = "a")]
-            AMOMAXU => { atomic!(advance, AmoFunction::Amomaxu) }
+            LrW | ScW | AmoswapW | AmoaddW | AmoxorW | AmoandW | AmoorW | AmominW | AmomaxW
+                | AmominuW | AmomaxuW => { atomic!(advance) }
+            #[cfg(all(feature = "64-bit", feature = "a"))]
+            LrD | ScD | AmoswapD | AmoaddD | AmoxorD | AmoandD | AmoorD | AmominD | AmomaxD
+                | AmominuD | AmomaxuD => { atomic!(advance) }
+
+            // Breakpoints, privilege levels and interrupts are not modelled, and with a single
+            // hart and decoded code that is kept coherent with memory there is nothing to order
+            // or synchronize. Programs execute these rarely, so they are kept out of the way of
+            // the other instructions.
+            Ebreak | Fence | FenceI | Sret | Mret | Wfi | SfenceVma => {
+                core::hint::cold_path();
+                slot += advance;
+            }
+            // No control and status register is modelled: all of them read as zero and ignore
+            // writes.
+            Csrrw | Csrrs | Csrrc | Csrrwi | Csrrsi | Csrrci => {
+                core::hint::cold_path();
+                set!(advance, 0)
+            }
         })
     };
 
@@ -366,17 +415,31 @@ pub(super) fn execute<M: Memory, const PRECISE: bool>(
     reason = "XWord is 32 or 64 bits wide depending on the enabled features"
 )]
 fn atomic<M: Memory>(
-    function: AmoFunction,
     r: &mut [XWord; Registers::LEN],
     reservation: &mut Option<Address>,
     memory: &mut M,
     op: Op,
 ) -> Result<bool, Fault> {
+    use Opcode::*;
+
+    let opcode = op.opcode();
     let address = r[Registers::slot(op.rs1)];
     let source = r[Registers::slot(op.rs2)];
-    // Lowering only produces sizes of 4 and, on 64-bit, 8 bytes.
-    let word = op.imm == 4;
-    if address & (op.imm as XWord - 1) != 0 {
+    // The access is a word, or else a doubleword.
+    let word = matches!(
+        opcode,
+        LrW | ScW |
+            AmoswapW |
+            AmoaddW |
+            AmoxorW |
+            AmoandW |
+            AmoorW |
+            AmominW |
+            AmomaxW |
+            AmominuW |
+            AmomaxuW
+    );
+    if address & (if word { 3 } else { 7 }) != 0 {
         return Err(Fault::UnalignedAmo);
     }
 
@@ -395,12 +458,12 @@ fn atomic<M: Memory>(
         memory.store(address, (value as u32).to_le_bytes())
     };
 
-    let (result, watched) = match function {
-        AmoFunction::Lr => {
+    let (result, watched) = match opcode {
+        LrW | LrD => {
             *reservation = Some(address);
             (load(memory), false)
         }
-        AmoFunction::Sc => {
+        ScW | ScD => {
             let reserved = reservation.take() == Some(address);
             let watched = reserved && store(memory, source);
             (!reserved as XWord, watched)
@@ -408,17 +471,17 @@ fn atomic<M: Memory>(
         _ => {
             let old = load(memory);
             let source = if word { source as i32 as SXWord as XWord } else { source };
-            let new = match function {
-                AmoFunction::Amoswap => source,
-                AmoFunction::Amoadd => old.wrapping_add(source),
-                AmoFunction::Amoxor => old ^ source,
-                AmoFunction::Amoand => old & source,
-                AmoFunction::Amoor => old | source,
-                AmoFunction::Amomin => (old as SXWord).min(source as SXWord) as XWord,
-                AmoFunction::Amomax => (old as SXWord).max(source as SXWord) as XWord,
-                AmoFunction::Amominu => old.min(source),
-                AmoFunction::Amomaxu => old.max(source),
-                AmoFunction::Lr | AmoFunction::Sc => unreachable!("handled above"),
+            let new = match opcode {
+                AmoswapW | AmoswapD => source,
+                AmoaddW | AmoaddD => old.wrapping_add(source),
+                AmoxorW | AmoxorD => old ^ source,
+                AmoandW | AmoandD => old & source,
+                AmoorW | AmoorD => old | source,
+                AmominW | AmominD => (old as SXWord).min(source as SXWord) as XWord,
+                AmomaxW | AmomaxD => (old as SXWord).max(source as SXWord) as XWord,
+                AmominuW | AmominuD => old.min(source),
+                AmomaxuW | AmomaxuD => old.max(source),
+                _ => unreachable!("only atomic instructions are dispatched here"),
             };
             (old, store(memory, new))
         }

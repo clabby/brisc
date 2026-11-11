@@ -1,14 +1,11 @@
 //! The cache of decoded instructions.
 
-use super::{
-    lower::lower,
-    op::{self, narrow, wide, Op},
-};
+use super::op::{code, decode, Op};
 use crate::memory::{
     page_base, page_offset, Address, Memory, PageIndex, MAX_PAGE_INDEX, PAGE_SIZE,
 };
 use alloc::{boxed::Box, vec, vec::Vec};
-use brisc_isa::Word;
+use brisc_isa::{Opcode, Word};
 use core::fmt;
 use hashbrown::HashMap;
 
@@ -64,20 +61,20 @@ impl CodeCache {
         let position = self.position(page);
         memory.watch(page);
 
-        while slot < SLOTS && self.pages[position][slot].code == narrow::DECODE {
+        while slot < SLOTS && self.pages[position][slot].code == code::DECODE {
             let address = page_base(page).wrapping_add((slot as Address) << 1);
-            let op = lower(Word::from_le_bytes(memory.load(address))).unwrap_or(Op::ILLEGAL);
-            let is_wide = op.code & op::WIDE != 0;
-            self.pages[position][slot] = op;
+            let Ok(instruction) = decode(Word::from_le_bytes(memory.load(address))) else {
+                self.pages[position][slot] = Op::ILLEGAL;
+                break;
+            };
+            let is_wide = instruction.length == 4;
+            self.pages[position][slot] = Op::new(instruction);
 
             if is_wide && slot == SLOTS - 1 {
                 // The instruction continues on the next page.
                 memory.watch(page.wrapping_add(1) & MAX_PAGE_INDEX);
             }
-            if matches!(
-                op.code,
-                narrow::ILLEGAL | narrow::JAL | wide::JAL | narrow::JALR | wide::JALR
-            ) {
+            if matches!(instruction.opcode, Opcode::Jal | Opcode::Jalr) {
                 break;
             }
             slot += if is_wide { 2 } else { 1 };

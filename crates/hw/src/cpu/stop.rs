@@ -27,10 +27,6 @@ pub enum Fault {
     /// The word at the program counter is not an instruction.
     #[error(transparent)]
     Decode(#[from] InstructionDecodeError),
-    /// An atomic instruction has an access size other than a word or, on 64-bit, a doubleword.
-    #[cfg(feature = "a")]
-    #[error("Bad AMO size: {0}")]
-    BadAmoSize(u8),
     /// The address of an atomic instruction is not aligned to its access size.
     #[cfg(feature = "a")]
     #[error("Unaligned atomic memory access.")]

@@ -16,10 +16,8 @@ use code::{slot_of, CodeCache, SLOTS};
 mod exec;
 use exec::{execute, Exit};
 
-mod lower;
-use lower::lower;
-
 mod op;
+use op::decode;
 
 mod registers;
 pub use registers::Registers;
@@ -109,7 +107,7 @@ impl Cpu {
                 Exit::Decode => self.code.decode(memory, page, slot_of(pc)),
                 Exit::Ecall => break Stop::Ecall,
                 Exit::Illegal => {
-                    let fault = lower(Word::from_le_bytes(memory.load(pc)))
+                    let fault = decode(Word::from_le_bytes(memory.load(pc)))
                         .expect_err("an illegal slot holds a word that does not decode");
                     break Stop::Fault(fault);
                 }
