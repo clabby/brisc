@@ -2,12 +2,18 @@
 
 use crate::{cfg::EmuConfig, st::StEmu};
 use brisc_hw::{
-    kernel::Kernel,
+    cpu::Registers,
+    kernel::{AsyncKernel, Kernel, Syscall},
     memory::{Memory, SparseMemory},
-    pipeline::PipelineRegister,
     XWord, REG_A0, REG_A1, REG_A2,
 };
-use std::{fs, path::PathBuf};
+use std::{
+    fs,
+    future::Future,
+    path::PathBuf,
+    pin::{pin, Pin},
+    task::{Context, Poll, Waker},
+};
 
 use rstest as _;
 use tracing_subscriber as _;
@@ -51,7 +57,7 @@ impl TestProgram {
         Self(
             StEmu::<TestStEmuConfig>::builder()
                 .with_kernel(RiscvTestKernel)
-                .with_ctx(())
+                .with_ctx(0)
                 .with_elf(elf)
                 .unwrap()
                 .build(),
@@ -64,13 +70,8 @@ impl TestProgram {
     ///
     /// Panics if the program exits with a non-zero exit code.
     pub fn run(mut self) -> u64 {
-        let mut instructions = 0;
-        while !self.0.register.exit {
-            self.0.cycle().unwrap();
-            instructions += 1;
-        }
-
-        let exit_code = self.0.register.exit_code;
+        let exit_code = self.0.run().unwrap();
+        let instructions = self.0.cpu.instret;
         assert_eq!(
             exit_code,
             0,
@@ -82,8 +83,25 @@ impl TestProgram {
 }
 
 /// Runs the test program at `test_path` and returns the number of instructions it retired.
+///
+/// The program is run twice: with a synchronous kernel, and with an asynchronous kernel that
+/// suspends on every system call. Both runs must retire the same instructions.
 pub fn run_riscv_test(test_path: &PathBuf) -> u64 {
-    TestProgram::load(&fs::read(test_path).unwrap()).run()
+    let elf = fs::read(test_path).unwrap();
+    let instructions = TestProgram::load(&elf).run();
+
+    let mut emu = StEmu::<SuspendingConfig>::builder()
+        .with_kernel(SuspendingKernel(RiscvTestKernel))
+        .with_ctx(0)
+        .with_elf(&elf)
+        .unwrap()
+        .build();
+    assert_eq!(block_on(emu.run_async()), Ok(0));
+    assert_eq!(emu.cpu.instret, instructions);
+    // Every program exits through a system call, which the kernel counted in the context.
+    assert!(emu.take_ctx() > 0);
+
+    instructions
 }
 
 #[derive(Default, Debug)]
@@ -94,32 +112,44 @@ impl EmuConfig<'_> for TestStEmuConfig {
 
     type Kernel = RiscvTestKernel;
 
-    type Context = ();
+    /// The number of system calls serviced.
+    type Context = u64;
 }
 
 #[derive(Default, Debug)]
+struct SuspendingConfig;
+
+impl EmuConfig<'_> for SuspendingConfig {
+    type Memory = SparseMemory;
+
+    type Kernel = SuspendingKernel;
+
+    /// The number of system calls serviced.
+    type Context = u64;
+}
+
+/// The kernel that the test programs expect: it implements `exit` and `write`.
+#[derive(Default, Debug)]
 struct RiscvTestKernel;
 
-impl Kernel<()> for RiscvTestKernel {
-    type Error = ();
+impl Kernel<u64> for RiscvTestKernel {
+    /// The number of the unsupported system call.
+    type Error = XWord;
 
     fn syscall<M: Memory>(
         &mut self,
         sysno: XWord,
         mem: &mut M,
-        p_reg: &mut PipelineRegister,
-        _: &mut (),
-    ) -> Result<XWord, Self::Error> {
+        registers: &mut Registers,
+        serviced: &mut u64,
+    ) -> Result<Syscall, Self::Error> {
+        *serviced += 1;
         match sysno {
-            0x5D => {
-                let exit_code = p_reg.registers[REG_A0];
-                p_reg.exit_code = exit_code;
-                p_reg.exit = true;
-            }
+            0x5D => Ok(Syscall::Exit(registers.get(REG_A0))),
             0x40 => {
-                let fd = p_reg.registers[REG_A0];
-                let ptr = p_reg.registers[REG_A1];
-                let len = p_reg.registers[REG_A2];
+                let fd = registers.get(REG_A0);
+                let ptr = registers.get(REG_A1);
+                let len = registers.get(REG_A2);
 
                 let mut raw_msg = vec![0; len as usize];
                 mem.read(ptr, &mut raw_msg);
@@ -130,10 +160,55 @@ impl Kernel<()> for RiscvTestKernel {
                 } else if fd == 2 {
                     tracing::error!(target: "test-runner", "stderr: {}", msg);
                 }
+                Ok(Syscall::Continue)
             }
-            _ => unimplemented!(),
+            _ => Err(sysno),
         }
+    }
+}
 
-        Ok(0)
+/// A [RiscvTestKernel] that suspends once before it services each system call.
+#[derive(Debug)]
+struct SuspendingKernel(RiscvTestKernel);
+
+impl AsyncKernel<u64> for SuspendingKernel {
+    type Error = XWord;
+
+    async fn syscall<M: Memory>(
+        &mut self,
+        sysno: XWord,
+        mem: &mut M,
+        registers: &mut Registers,
+        serviced: &mut u64,
+    ) -> Result<Syscall, Self::Error> {
+        SuspendOnce(false).await;
+        Kernel::syscall(&mut self.0, sysno, mem, registers, serviced)
+    }
+}
+
+/// A future that is pending the first time it is polled.
+struct SuspendOnce(bool);
+
+impl Future for SuspendOnce {
+    type Output = ();
+
+    fn poll(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<()> {
+        if self.0 {
+            Poll::Ready(())
+        } else {
+            self.0 = true;
+            Poll::Pending
+        }
+    }
+}
+
+/// Polls `future` on the current thread until it completes.
+fn block_on<F: Future>(future: F) -> F::Output {
+    let mut future = pin!(future);
+    let mut context = Context::from_waker(Waker::noop());
+    loop {
+        if let Poll::Ready(output) = future.as_mut().poll(&mut context) {
+            return output;
+        }
     }
 }

@@ -1,6 +1,7 @@
-# `brisc`
+# `brisc-emu`
 
-This crate contains a simple RISC-V emulator.
+This crate contains a single-threaded RISC-V emulator: a hart from `brisc-hw`, its memory, an ELF
+loader, and the loop that hands system calls to a kernel.
 
 ## Features
 
@@ -18,10 +19,9 @@ following features:
 ```rust
 use brisc_emu::{cfg::EmuConfig, st::StEmu};
 use brisc_hw::{
-    errors::PipelineResult,
-    kernel::Kernel,
-    memory::{Memory, SimpleMemory},
-    pipeline::PipelineRegister,
+    cpu::Registers,
+    kernel::{Kernel, Syscall},
+    memory::{Memory, SparseMemory},
     XWord, REG_A0, REG_A1, REG_A2,
 };
 
@@ -55,57 +55,55 @@ use brisc_hw::{
 ///     ecall                       # invoke system call
 const HELLO_WORLD_ELF: &str = "7f454c460201010000000000000000000200f30001000000e8000100000000004000000000000000380100000000000004000000400038000300400004000300030000700400000000000000000000000000000000000000000000000000000000000000000000000000000000000000080000000000000001000000050000000000000000000000000001000000000000000100000000000c010000000000000c01000000000000001000000000000001000000060000000c010000000000000c110100000000000c110100000000000e000000000000000e0000000000000000100000000000001305100097150000938505021306e0009308000473000000130500009308d0057300000048656c6c6f2c20776f726c64210a002e7368737472746162002e74657874002e646174610000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000b000000010000000600000000000000e800010000000000e8000000000000002400000000000000000000000000000004000000000000000000000000000000110000000100000003000000000000000c110100000000000c010000000000000e000000000000000000000000000000010000000000000000000000000000000100000003000000000000000000000000000000000000001a010000000000001700000000000000000000000000000001000000000000000000000000000000";
 
-#[derive(Default)]
 struct ExampleKernel;
 
-impl Kernel for ExampleKernel {
+/// The kernel appends everything the program writes to the `String` it is handed as its state.
+impl Kernel<String> for ExampleKernel {
+    /// The number of the unsupported system call.
+    type Error = XWord;
+
     fn syscall<M: Memory>(
         &mut self,
         sysno: XWord,
         mem: &mut M,
-        p_reg: &mut PipelineRegister,
-    ) -> PipelineResult<XWord> {
+        registers: &mut Registers,
+        output: &mut String,
+    ) -> Result<Syscall, Self::Error> {
         match sysno {
-            0x5D => {
-                let exit_code = p_reg.registers[REG_A0 as usize];
-                p_reg.exit_code = exit_code;
-                p_reg.exit = true;
-            }
+            // exit
+            0x5D => Ok(Syscall::Exit(registers.get(REG_A0))),
+            // write
             0x40 => {
-                let fd = p_reg.registers[REG_A0 as usize];
-                let ptr = p_reg.registers[REG_A1 as usize];
-                let len = p_reg.registers[REG_A2 as usize];
-
-                let raw_msg = mem.read_memory_range(ptr, len).unwrap();
-                let msg = String::from_utf8_lossy(&raw_msg);
-
-                match fd {
-                    1 => println!("{msg}"),
-                    2 => eprintln!("{msg}"),
-                    _ => panic!("Unknown file descriptor: {msg}"),
-                }
+                let mut msg = vec![0; registers.get(REG_A2) as usize];
+                mem.read(registers.get(REG_A1), &mut msg);
+                output.push_str(&String::from_utf8_lossy(&msg));
+                Ok(Syscall::Continue)
             }
-            _ => panic!("Unknown system call: {sysno}"),
+            _ => Err(sysno),
         }
-
-        Ok(0)
     }
 }
 
-#[derive(Default)]
 struct ExampleEmuConfig;
 
-impl EmuConfig for ExampleEmuConfig {
-    type Memory = SimpleMemory;
+impl EmuConfig<'_> for ExampleEmuConfig {
+    type Memory = SparseMemory;
     type Kernel = ExampleKernel;
+    type Context = String;
 }
 
 let elf = const_hex::decode(HELLO_WORLD_ELF).unwrap();
 let mut emu = StEmu::<ExampleEmuConfig>::builder()
     .with_kernel(ExampleKernel)
+    .with_ctx(String::new())
     .with_elf(&elf)
     .unwrap()
     .build();
 
-emu.run().unwrap();
+let exit_code = emu.run().unwrap();
+assert_eq!(exit_code, 0);
+assert_eq!(emu.take_ctx(), "Hello, world!\n");
 ```
+
+A kernel that needs to wait for something implements `AsyncKernel` instead and is driven by
+`StEmu::run_async`. Both kinds of kernel are available in the same build.

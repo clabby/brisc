@@ -1,12 +1,10 @@
-//! Single-threaded, single-cycle 5-stage RISC-V pipeline.
+//! Single-threaded emulator.
 
 use crate::cfg::EmuConfig;
 use brisc_hw::{
-    errors::PipelineError,
-    kernel::Kernel,
-    pipeline::{
-        decode_instruction, execute, instruction_fetch, mem_access, writeback, PipelineRegister,
-    },
+    cpu::{Cpu, Fault, Stop},
+    kernel::{AsyncKernel, Kernel, Syscall},
+    XWord, REG_A7,
 };
 use thiserror::Error;
 
@@ -14,31 +12,36 @@ mod builder;
 pub use builder::StEmuBuilder;
 
 /// An error that can occur during emulation.
-#[derive(Error, Debug)]
-pub enum EmulationError<S, K: Kernel<S>> {
-    /// An error that occurred in the pipeline.
+#[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmulationError<E> {
+    /// The guest tried to execute an instruction that cannot be executed.
     #[error(transparent)]
-    Pipeline(#[from] PipelineError),
+    Fault(#[from] Fault),
 
     /// An error that occurred in the kernel.
-    #[error(transparent)]
-    Kernel(K::Error),
+    #[error("the kernel failed to service a system call")]
+    Kernel(E),
 }
 
-/// A [`Result`] type aslias for emulation results.
-pub type EmulationResult<'a, T, Config> = Result<
-    T,
-    EmulationError<<Config as EmuConfig<'a>>::Context, <Config as EmuConfig<'a>>::Kernel>,
->;
+/// The error type of the kernel of `Config`.
+pub type KernelError<'a, Config> =
+    <<Config as EmuConfig<'a>>::Kernel as AsyncKernel<<Config as EmuConfig<'a>>::Context>>::Error;
 
-/// Single-cycle RISC-V processor emulator.
-#[derive(Debug, Default)]
+/// A [`Result`] type alias for emulation results.
+pub type EmulationResult<'a, T, Config> = Result<T, EmulationError<KernelError<'a, Config>>>;
+
+/// A single RISC-V hart with its memory, the kernel that services its system calls, and the
+/// context handed to the kernel.
+///
+/// [StEmu::run] drives a [Kernel] and [StEmu::run_async] an [AsyncKernel]. Both execute guest
+/// instructions with the same [Cpu::run] and differ only in how they wait for the kernel.
+#[derive(Debug)]
 pub struct StEmu<'ctx, Config>
 where
     Config: EmuConfig<'ctx>,
 {
-    /// The pipeline register.
-    pub register: PipelineRegister,
+    /// The processor.
+    pub cpu: Cpu,
     /// The device memory.
     pub memory: Config::Memory,
     /// The system call interface.
@@ -56,91 +59,68 @@ where
         StEmuBuilder::default()
     }
 
-    /// Executes the program until it exits, returning the final [PipelineRegister].
-    #[cfg(not(feature = "async-kernel"))]
-    pub fn run(&mut self) -> EmulationResult<'ctx, PipelineRegister, Config> {
-        while !self.register.exit {
-            self.cycle()?;
-        }
-
-        Ok(self.register)
-    }
-
-    /// Execute a single cycle of the processor in full.
-    #[inline(always)]
-    #[cfg(not(feature = "async-kernel"))]
-    pub fn cycle(&mut self) -> EmulationResult<'ctx, (), Config> {
-        let r = &mut self.register;
-
-        // Execute all pipeline stages sequentially.
-        let cycle_res = instruction_fetch(r, &mut self.memory)
-            .and_then(|_| decode_instruction(r))
-            .and_then(|_| execute(r))
-            .and_then(|_| mem_access(r, &mut self.memory))
-            .and_then(|_| writeback(r));
-
-        // Handle system calls.
-        match cycle_res {
-            Ok(()) => {}
-            Err(PipelineError::SyscallException(syscall_no)) => {
-                self.kernel
-                    .syscall(syscall_no, &mut self.memory, r, &mut self.ctx)
-                    .map_err(EmulationError::Kernel)?;
-
-                // Exit emulation if the syscall terminated the program.
-                if r.exit {
-                    return Ok(());
-                }
+    /// Executes the program until it exits, returning its exit code.
+    pub fn run(&mut self) -> EmulationResult<'ctx, XWord, Config>
+    where
+        Config::Kernel: Kernel<Config::Context, Error = KernelError<'ctx, Config>>,
+    {
+        loop {
+            let syscall_no = self.run_to_syscall()?;
+            let syscall = Kernel::syscall(
+                &mut self.kernel,
+                syscall_no,
+                &mut self.memory,
+                &mut self.cpu.registers,
+                &mut self.ctx,
+            )
+            .map_err(EmulationError::Kernel)?;
+            if let Some(exit_code) = self.finish_syscall(syscall) {
+                return Ok(exit_code);
             }
-            Err(e) => return Err(e.into()),
         }
-
-        r.advance();
-        Ok(())
     }
 
-    /// Executes the program until it exits, returning the final [PipelineRegister].
-    #[cfg(feature = "async-kernel")]
-    pub async fn run(&mut self) -> EmulationResult<'ctx, PipelineRegister, Config> {
-        while !self.register.exit {
-            self.cycle().await?;
-        }
-
-        Ok(self.register)
-    }
-
-    /// Execute a single cycle of the processor in full.
-    #[inline(always)]
-    #[cfg(feature = "async-kernel")]
-    pub async fn cycle(&mut self) -> EmulationResult<'ctx, (), Config> {
-        let r = &mut self.register;
-
-        // Execute all pipeline stages sequentially.
-        let cycle_res = instruction_fetch(r, &mut self.memory)
-            .and_then(|_| decode_instruction(r))
-            .and_then(|_| execute(r))
-            .and_then(|_| mem_access(r, &mut self.memory))
-            .and_then(|_| writeback(r));
-
-        // Handle system calls.
-        match cycle_res {
-            Ok(()) => {}
-            Err(PipelineError::SyscallException(syscall_no)) => {
-                self.kernel
-                    .syscall(syscall_no, &mut self.memory, r, &mut self.ctx)
-                    .await
-                    .map_err(EmulationError::Kernel)?;
-
-                // Exit emulation if the syscall terminated the program.
-                if r.exit {
-                    return Ok(());
-                }
+    /// Executes the program until it exits, returning its exit code. Suspends whenever the
+    /// kernel does.
+    pub async fn run_async(&mut self) -> EmulationResult<'ctx, XWord, Config> {
+        loop {
+            let syscall_no = self.run_to_syscall()?;
+            let syscall = AsyncKernel::syscall(
+                &mut self.kernel,
+                syscall_no,
+                &mut self.memory,
+                &mut self.cpu.registers,
+                &mut self.ctx,
+            )
+            .await
+            .map_err(EmulationError::Kernel)?;
+            if let Some(exit_code) = self.finish_syscall(syscall) {
+                return Ok(exit_code);
             }
-            Err(e) => return Err(e.into()),
         }
+    }
 
-        r.advance();
-        Ok(())
+    /// Executes instructions up to the next system call and returns its number.
+    fn run_to_syscall(&mut self) -> Result<XWord, Fault> {
+        loop {
+            match self.cpu.run(&mut self.memory, u64::MAX) {
+                Stop::Ecall => return Ok(self.cpu.registers.get(REG_A7)),
+                Stop::Budget => {}
+                Stop::Fault(fault) => return Err(fault),
+            }
+        }
+    }
+
+    /// Returns the exit code if the system call ended the program, and otherwise moves the
+    /// program counter past the `ecall`.
+    const fn finish_syscall(&mut self, syscall: Syscall) -> Option<XWord> {
+        match syscall {
+            Syscall::Continue => {
+                self.cpu.pc = self.cpu.pc.wrapping_add(4);
+                None
+            }
+            Syscall::Exit(exit_code) => Some(exit_code),
+        }
     }
 
     /// Destroys the emulator and returns the context.

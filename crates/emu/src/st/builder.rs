@@ -3,7 +3,7 @@
 use super::StEmu;
 use crate::{cfg::EmuConfig, elf::load_elf};
 use alloc::string::String;
-use brisc_hw::{pipeline::PipelineRegister, XWord};
+use brisc_hw::{cpu::Cpu, XWord};
 
 /// A builder for the [`StEmu`] emulator.
 #[derive(Debug)]
@@ -76,10 +76,10 @@ where
     ///
     /// ## Panics
     ///
-    /// Panics if the memory or kernel is not set.
+    /// Panics if the memory, kernel or state is not set.
     pub fn build(self) -> StEmu<'ctx, Config> {
         StEmu {
-            register: PipelineRegister::new(self.pc),
+            cpu: Cpu::new(self.pc),
             memory: self.memory.expect("Memory not instantiated"),
             kernel: self.kernel.expect("Kernel not instantiated"),
             ctx: self.state.expect("State not instantiated"),
