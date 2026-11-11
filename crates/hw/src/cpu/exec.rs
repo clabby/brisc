@@ -398,9 +398,7 @@ fn atomic<M: Memory>(
     let (result, watched) = match function {
         AmoFunction::Lr => {
             *reservation = Some(address);
-            // A 32-bit load-reserved zero-extends its result.
-            let value = if word { load(memory) as u32 as XWord } else { load(memory) };
-            (value, false)
+            (load(memory), false)
         }
         AmoFunction::Sc => {
             let reserved = reservation.take() == Some(address);

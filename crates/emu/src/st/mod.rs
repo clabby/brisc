@@ -133,6 +133,42 @@ where
 mod test {
     use crate::test_suites;
 
+    #[test]
+    #[cfg(all(feature = "64-bit", feature = "a"))]
+    fn lr_w_sign_extends() {
+        use super::*;
+        use brisc_hw::{
+            memory::{Memory, SparseMemory},
+            REG_A0, REG_A1,
+        };
+
+        /// A configuration whose guest makes no system calls other than the one that ends the test.
+        struct NoKernel;
+
+        impl EmuConfig<'_> for NoKernel {
+            type Memory = SparseMemory;
+            type Kernel = ();
+            type Context = ();
+        }
+
+        let mut memory = SparseMemory::new();
+        // lr.w a0, (a1)
+        // ecall
+        memory.write(0x1000, &[0x2f, 0xa5, 0x05, 0x10, 0x73, 0x00, 0x00, 0x00]);
+        memory.write(0x2000, &0x8000_0000u32.to_le_bytes());
+
+        let mut emu = StEmu::<NoKernel>::builder()
+            .with_pc(0x1000)
+            .with_memory(memory)
+            .with_kernel(())
+            .with_ctx(())
+            .build();
+        emu.cpu.registers.set(REG_A1, 0x2000);
+
+        assert_eq!(emu.run(), Err(EmulationError::Kernel(())));
+        assert_eq!(emu.cpu.registers.get(REG_A0), 0xffff_ffff_8000_0000);
+    }
+
     test_suites!(
         base_dir = "../../rv-tests/bin",
         rv32ui ~ glob = "rv32ui-p-*",
