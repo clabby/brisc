@@ -52,10 +52,10 @@ impl CodeCache {
         position
     }
 
-    /// Decodes the instructions of `page` from `slot` up to the first one that is already decoded
-    /// or that execution cannot fall through.
+    /// Decodes the instructions of `page` from the slot `first` up to the first one that is
+    /// already decoded or that execution cannot fall through.
     ///
-    /// Returns the error of the bus if the instruction at `slot` cannot be fetched. A later
+    /// Returns the error of the bus if the instruction at `first` cannot be fetched. A later
     /// instruction that cannot be fetched is left for when execution reaches it.
     #[cold]
     pub(super) fn decode<B: Bus>(

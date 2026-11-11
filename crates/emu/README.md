@@ -1,7 +1,16 @@
 # `brisc-emu`
 
-This crate contains a single-threaded RISC-V emulator: a hart from `brisc-hw`, its memory, an ELF
-loader, and the loop that hands system calls to a kernel.
+This crate contains a single-threaded RISC-V emulator. `StEmu` puts together a hart from
+`brisc-hw`, the bus it runs on, a kernel that services its system calls, and a context that the
+kernel works on. An `EmuConfig` names the three types:
+
+- The bus is any `brisc_hw::bus::Bus`: `SparseMemory`, or memory and devices of your own.
+- The kernel is a `Kernel` or an `AsyncKernel`. `MinimalKernel` has the `exit` and `write` system
+  calls, which is enough for programs that only compute and print.
+- The context is state outside the kernel that every system call receives. The emulator hands
+  it back with `StEmu::take_ctx`.
+
+The crate also has an ELF loader, which the builder of the emulator uses.
 
 ## Features
 
@@ -111,3 +120,8 @@ assert_eq!(emu.take_ctx(), "Hello, world!\n");
 
 A kernel that needs to wait for something implements `AsyncKernel` instead and is driven by
 `StEmu::run_async`. Both kinds of kernel are available in the same build.
+
+`StEmu::run` returns an `EmulationError` when the guest executes something that is not an
+instruction, executes an `ebreak`, when the bus fails an access, and when the kernel fails a
+system call. The emulator stays as it was before the instruction or system call that failed, so
+the caller can inspect it, repair the cause and run it again.

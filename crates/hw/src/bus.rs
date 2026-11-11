@@ -57,7 +57,8 @@ pub const fn page_base(page: PageIndex) -> Address {
 /// The hart decodes every instruction once and keeps the decoded form, so it has to hear about
 /// writes to the bytes it decoded. It learns about them through three methods:
 ///
-/// - The hart calls [Bus::watch] for a page before it fetches instructions from it.
+/// - The hart calls [Bus::watch] for every page that holds a byte of an instruction it keeps in
+///   decoded form, before it executes the instruction.
 /// - The first write to a watched page, by [Bus::store] or [Bus::write], ends the watch and queues
 ///   the page for [Bus::pop_dirty]. A store that does this returns `Ok(true)`.
 /// - The hart empties the queue with [Bus::pop_dirty] when it starts to run and after every store
