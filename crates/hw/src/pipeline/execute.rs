@@ -219,13 +219,7 @@ fn execute_reg_arithmetic(
             }
         }
         #[cfg(feature = "m")]
-        RegisterArithmeticFunction::Divu => {
-            if rs2 == 0 {
-                XWord::MAX
-            } else {
-                rs1 / rs2
-            }
-        }
+        RegisterArithmeticFunction::Divu => rs1.checked_div(rs2).unwrap_or(XWord::MAX),
         #[cfg(feature = "m")]
         RegisterArithmeticFunction::Rem => {
             if rs2 == 0 {
@@ -299,13 +293,7 @@ fn execute_reg_arithmetic_word(
             }
         }
         #[cfg(feature = "m")]
-        RegisterArithmeticWordFunction::Divuw => {
-            if rs2 == 0 {
-                Word::MAX
-            } else {
-                rs1 / rs2
-            }
-        }
+        RegisterArithmeticWordFunction::Divuw => rs1.checked_div(rs2).unwrap_or(Word::MAX),
         #[cfg(feature = "m")]
         RegisterArithmeticWordFunction::Remw => {
             if rs2 == 0 {
