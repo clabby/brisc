@@ -20,7 +20,7 @@ brisc-hw.workspace = true
 
 # External
 thiserror.workspace = true
-elf = { version = "0.8.0", default-features = false }
+elf.workspace = true
 
 # `test-utils` feature
 rstest = { workspace = true, optional = true }
@@ -32,7 +32,7 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 rstest.workspace = true
 criterion.workspace = true
-const-hex = { version = "1.15.0", features = ["hex"] }
+const-hex.workspace = true
 
 [features]
 default = [ "64-bit", "a", "c", "m" ]
