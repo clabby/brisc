@@ -80,7 +80,7 @@ const HELLO_WORLD_ELF: &str = "7f454c460201010000000000000000000200f30001000000e
 struct ExampleKernel;
 
 /// The kernel appends everything the program writes to the `String` it is handed as its state.
-impl Kernel<String> for ExampleKernel {
+impl<T> Kernel<String, T> for ExampleKernel {
     /// The number of the unsupported system call.
     type Error = XWord;
 
@@ -90,6 +90,7 @@ impl Kernel<String> for ExampleKernel {
         memory: &mut B,
         registers: &mut Registers,
         output: &mut String,
+        _tracer: &mut T,
     ) -> Result<Syscall, SyscallError<XWord, B::Error>> {
         match sysno {
             // exit

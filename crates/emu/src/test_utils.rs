@@ -158,6 +158,7 @@ fn run_in_slices(elf: &[u8], budget: u64) -> u64 {
                     &mut emu.memory,
                     &mut emu.cpu.registers,
                     &mut emu.ctx,
+                    &mut (),
                 )
                 .unwrap();
                 match syscall {
@@ -205,10 +206,11 @@ impl AsyncKernel<Vec<u8>> for SuspendingKernel {
         memory: &mut M,
         registers: &mut Registers,
         output: &mut Vec<u8>,
+        tracer: &mut (),
     ) -> Result<Syscall, SyscallError<UnknownSyscall, M::Error>> {
         SuspendOnce(false).await;
         self.suspensions += 1;
-        Kernel::syscall(&mut MinimalKernel, syscall_no, memory, registers, output)
+        Kernel::syscall(&mut MinimalKernel, syscall_no, memory, registers, output, tracer)
     }
 }
 

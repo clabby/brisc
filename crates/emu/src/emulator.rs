@@ -119,7 +119,7 @@ impl<M: Memory, K, S, T: Tracer<M, S>> Emulator<M, K, S, T> {
     /// again; the kernel may have changed the registers, the memory and the state before it failed.
     pub fn run(&mut self) -> Result<XWord, EmulationError<K::Error, M::Error>>
     where
-        K: Kernel<S>,
+        K: Kernel<S, T>,
     {
         loop {
             let syscall_no = self.run_to_syscall()?;
@@ -129,6 +129,7 @@ impl<M: Memory, K, S, T: Tracer<M, S>> Emulator<M, K, S, T> {
                 &mut self.memory,
                 &mut self.cpu.registers,
                 &mut self.ctx,
+                &mut self.tracer,
             )?;
             if let Some(exit_code) = self.finish_syscall(syscall) {
                 return Ok(exit_code);
@@ -142,7 +143,7 @@ impl<M: Memory, K, S, T: Tracer<M, S>> Emulator<M, K, S, T> {
     /// Errors leave the emulator as they do for [`Emulator::run`].
     pub async fn run_async(&mut self) -> Result<XWord, EmulationError<K::Error, M::Error>>
     where
-        K: AsyncKernel<S>,
+        K: AsyncKernel<S, T>,
     {
         loop {
             let syscall_no = self.run_to_syscall()?;
@@ -152,6 +153,7 @@ impl<M: Memory, K, S, T: Tracer<M, S>> Emulator<M, K, S, T> {
                 &mut self.memory,
                 &mut self.cpu.registers,
                 &mut self.ctx,
+                &mut self.tracer,
             )
             .await?;
             if let Some(exit_code) = self.finish_syscall(syscall) {
@@ -359,7 +361,7 @@ mod test {
     /// A kernel whose only system call exits with the byte at the address in `a0`.
     struct LoadKernel;
 
-    impl Kernel<()> for LoadKernel {
+    impl<T> Kernel<(), T> for LoadKernel {
         type Error = ();
 
         fn syscall<M: Memory>(
@@ -368,6 +370,7 @@ mod test {
             memory: &mut M,
             registers: &mut Registers,
             _: &mut (),
+            _: &mut T,
         ) -> Result<Syscall, SyscallError<(), M::Error>> {
             let [byte] = memory.load(registers.get(REG_A0))?;
             Ok(Syscall::Exit(byte as XWord))

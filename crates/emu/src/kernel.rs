@@ -48,8 +48,76 @@ impl<K, M> From<M> for SyscallError<K, M> {
 /// A kernel that services system calls synchronously.
 ///
 /// `S` is state that lives outside the kernel and is passed to every system call, for the kernel
-/// to read and modify.
-pub trait Kernel<S> {
+/// to read and modify. `T` is the [`Tracer`](brisc_hw::cpu::Tracer) of the emulator that runs the
+/// guest, which every system call receives so that the kernel can log what it does. A kernel that
+/// ignores the tracer implements the trait for every `T`; one that logs asks for the tracer it
+/// logs to. The tracer below never sees an instruction, because it does not ask for them, and still
+/// records every system call:
+///
+/// ```
+/// use brisc_emu::{
+///     kernel::{Kernel, Syscall, SyscallError},
+///     Emulator,
+/// };
+/// use brisc_hw::{
+///     cpu::{Registers, Step, Tracer},
+///     memory::{Memory, SparseMemory},
+///     rv_code, XWord,
+/// };
+///
+/// /// What a kernel can log to.
+/// trait Log {
+///     fn log(&mut self, event: XWord);
+/// }
+///
+/// #[derive(Default)]
+/// struct Events(Vec<XWord>);
+///
+/// impl Log for Events {
+///     fn log(&mut self, event: XWord) {
+///         self.0.push(event);
+///     }
+/// }
+///
+/// impl<M: Memory, C> Tracer<M, C> for Events {
+///     const ENABLED: bool = false;
+///
+///     fn trace(&mut self, _: &mut C, _: &M, _: &Registers, _: &Step) {}
+/// }
+///
+/// struct LoggingKernel;
+///
+/// impl<T: Log> Kernel<(), T> for LoggingKernel {
+///     type Error = ();
+///
+///     fn syscall<M: Memory>(
+///         &mut self,
+///         syscall_no: XWord,
+///         _: &mut M,
+///         _: &mut Registers,
+///         _: &mut (),
+///         tracer: &mut T,
+///     ) -> Result<Syscall, SyscallError<(), M::Error>> {
+///         tracer.log(syscall_no);
+///         Ok(if syscall_no == 93 { Syscall::Exit(0) } else { Syscall::Continue })
+///     }
+/// }
+///
+/// let mut memory = SparseMemory::new();
+/// let code = rv_code! {
+///     addi a7, zero, 7;
+///     ecall;
+///     addi a7, zero, 93;
+///     ecall;
+/// };
+/// memory.write(0x1000, &code).unwrap();
+/// let mut emu =
+///     Emulator::new(memory, LoggingKernel, ()).with_entry(0x1000).with_tracer(Events::default());
+///
+/// assert_eq!(emu.run(), Ok(0));
+/// assert_eq!(emu.tracer.0, [7, 93]);
+/// ```
+pub trait Kernel<S, T = ()> {
     /// The error returned when a system call cannot be serviced.
     type Error;
 
@@ -61,14 +129,16 @@ pub trait Kernel<S> {
         memory: &mut M,
         registers: &mut Registers,
         state: &mut S,
+        tracer: &mut T,
     ) -> Result<Syscall, SyscallError<Self::Error, M::Error>>;
 }
 
 /// A kernel that may suspend while it services a system call.
 ///
 /// `S` is state that lives outside the kernel and is passed to every system call, for the kernel
-/// to read and modify. Every [`Kernel`] is also an [`AsyncKernel`] that never suspends.
-pub trait AsyncKernel<S> {
+/// to read and modify, and `T` is the tracer, as for [`Kernel`]. Every [`Kernel`] is also an
+/// [`AsyncKernel`] that never suspends.
+pub trait AsyncKernel<S, T = ()> {
     /// The error returned when a system call cannot be serviced.
     type Error;
 
@@ -80,10 +150,11 @@ pub trait AsyncKernel<S> {
         memory: &mut M,
         registers: &mut Registers,
         state: &mut S,
+        tracer: &mut T,
     ) -> impl Future<Output = Result<Syscall, SyscallError<Self::Error, M::Error>>>;
 }
 
-impl<S, K: Kernel<S>> AsyncKernel<S> for K {
+impl<S, T, K: Kernel<S, T>> AsyncKernel<S, T> for K {
     type Error = K::Error;
 
     fn syscall<M: Memory>(
@@ -92,13 +163,14 @@ impl<S, K: Kernel<S>> AsyncKernel<S> for K {
         memory: &mut M,
         registers: &mut Registers,
         state: &mut S,
+        tracer: &mut T,
     ) -> impl Future<Output = Result<Syscall, SyscallError<Self::Error, M::Error>>> {
-        ready(Kernel::syscall(self, syscall_no, memory, registers, state))
+        ready(Kernel::syscall(self, syscall_no, memory, registers, state, tracer))
     }
 }
 
 /// The kernel of a guest that makes no system calls: every system call is an error.
-impl<S> Kernel<S> for () {
+impl<S, T> Kernel<S, T> for () {
     type Error = ();
 
     fn syscall<M: Memory>(
@@ -107,6 +179,7 @@ impl<S> Kernel<S> for () {
         _: &mut M,
         _: &mut Registers,
         _: &mut S,
+        _: &mut T,
     ) -> Result<Syscall, SyscallError<Self::Error, M::Error>> {
         Err(SyscallError::Kernel(()))
     }
@@ -136,7 +209,7 @@ impl MinimalKernel {
 #[error("unknown system call {0}")]
 pub struct UnknownSyscall(pub XWord);
 
-impl<S: Extend<u8>> Kernel<S> for MinimalKernel {
+impl<S: Extend<u8>, T> Kernel<S, T> for MinimalKernel {
     type Error = UnknownSyscall;
 
     fn syscall<M: Memory>(
@@ -145,6 +218,7 @@ impl<S: Extend<u8>> Kernel<S> for MinimalKernel {
         memory: &mut M,
         registers: &mut Registers,
         output: &mut S,
+        _: &mut T,
     ) -> Result<Syscall, SyscallError<Self::Error, M::Error>> {
         match syscall_no {
             Self::EXIT => Ok(Syscall::Exit(registers.get(REG_A0))),

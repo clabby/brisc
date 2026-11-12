@@ -42,6 +42,35 @@ pub trait Tracer<M: Memory, C> {
     fn trace(&mut self, ctx: &mut C, memory: &M, registers: &Registers, step: &Step);
 }
 
+/// Tracers that run one after the other, in the order of the tuple. A tuple traces if any of its
+/// tracers does, and only the tracers that do are called.
+macro_rules! tuple_tracers {
+    ($(($($index:tt $name:ident),+))+) => {$(
+        impl<M: Memory, C, $($name: Tracer<M, C>),+> Tracer<M, C> for ($($name,)+) {
+            const ENABLED: bool = $($name::ENABLED)||+;
+
+            fn trace(&mut self, ctx: &mut C, memory: &M, registers: &Registers, step: &Step) {
+                $(
+                    if $name::ENABLED {
+                        self.$index.trace(ctx, memory, registers, step);
+                    }
+                )+
+            }
+        }
+    )+};
+}
+
+tuple_tracers! {
+    (0 T0)
+    (0 T0, 1 T1)
+    (0 T0, 1 T1, 2 T2)
+    (0 T0, 1 T1, 2 T2, 3 T3)
+    (0 T0, 1 T1, 2 T2, 3 T3, 4 T4)
+    (0 T0, 1 T1, 2 T2, 3 T3, 4 T4, 5 T5)
+    (0 T0, 1 T1, 2 T2, 3 T3, 4 T4, 5 T5, 6 T6)
+    (0 T0, 1 T1, 2 T2, 3 T3, 4 T4, 5 T5, 6 T6, 7 T7)
+}
+
 /// The tracer that does nothing, and costs nothing.
 impl<M: Memory, C> Tracer<M, C> for () {
     const ENABLED: bool = false;
@@ -106,6 +135,51 @@ mod test {
         cpu.run_traced(&mut memory, 5, &mut recorder, &mut count);
         assert_eq!(recorder.0.len(), 4);
         assert_eq!(recorder.0[3].0.instret, 2);
+    }
+
+    #[test]
+    fn a_tuple_of_tracers_shows_every_instruction_to_each() {
+        let mut memory = SparseMemory::new();
+        let code = rv_code! {
+            addi a0, zero, 3;
+            slli a0, a0, 2;
+            ecall;
+        };
+        let Ok(()) = memory.write(0x1000, &code);
+        let mut cpu = Cpu::new(0x1000);
+        let mut tracers = (Recorder::default(), (), Recorder::default());
+        let mut count = 0;
+
+        assert_eq!(cpu.run_traced(&mut memory, u64::MAX, &mut tracers, &mut count), Stop::Ecall);
+        assert_eq!(tracers.0 .0.len(), 3);
+        assert_eq!(tracers.0 .0, tracers.2 .0);
+        assert_eq!(count, 6);
+
+        // A tuple traces if one of its tracers does.
+        const { assert!(<(Recorder, ()) as Tracer<SparseMemory, u32>>::ENABLED) };
+        const { assert!(!<((), ()) as Tracer<SparseMemory, u32>>::ENABLED) };
+    }
+
+    #[test]
+    fn a_tracer_that_does_not_trace_is_not_called_from_a_tuple() {
+        struct Disabled;
+
+        impl Tracer<SparseMemory, u32> for Disabled {
+            const ENABLED: bool = false;
+
+            fn trace(&mut self, _: &mut u32, _: &SparseMemory, _: &Registers, _: &Step) {
+                panic!("a tracer that does not trace was called");
+            }
+        }
+
+        let mut memory = SparseMemory::new();
+        let Ok(()) = memory.write(0x1000, &rv_code! { addi a0, zero, 3; ecall });
+        let mut cpu = Cpu::new(0x1000);
+        let mut tracers = (Recorder::default(), Disabled);
+        let mut count = 0;
+
+        assert_eq!(cpu.run_traced(&mut memory, u64::MAX, &mut tracers, &mut count), Stop::Ecall);
+        assert_eq!(tracers.0 .0.len(), 2);
     }
 
     #[test]
