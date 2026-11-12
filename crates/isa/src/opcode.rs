@@ -11,11 +11,11 @@ pub enum Format {
     None,
     /// `rd, rs1, rs2`
     R,
-    /// `rs1, rs2`: the fields of [Format::R] without a destination.
+    /// `rs1, rs2`: the fields of [`Format::R`] without a destination.
     Sources,
     /// `rd, rs1, imm`
     I,
-    /// `rd, imm(rs1)`: the fields of [Format::I], written as a register and an address.
+    /// `rd, imm(rs1)`: the fields of [`Format::I`], written as a register and an address.
     Load,
     /// `rs2, imm(rs1)`
     S,
@@ -25,20 +25,20 @@ pub enum Format {
     U,
     /// `rd, imm`, where the immediate is an offset from the instruction.
     J,
-    /// `rd, (rs1)`: the fields of [Format::R] without a second source, and the ordering
+    /// `rd, (rs1)`: the fields of [`Format::R`] without a second source, and the ordering
     /// constraints in the immediate.
     Lr,
-    /// `rd, rs2, (rs1)`: the fields of [Format::R], and the ordering constraints in the
+    /// `rd, rs2, (rs1)`: the fields of [`Format::R`], and the ordering constraints in the
     /// immediate.
     Amo,
-    /// `rd, csr, rs1`: the fields of [Format::I], with the address of the CSR as the immediate.
+    /// `rd, csr, rs1`: the fields of [`Format::I`], with the address of the CSR as the immediate.
     Csr,
-    /// `rd, csr, uimm`: as [Format::Csr], with a 5-bit immediate in the place of `rs1`.
+    /// `rd, csr, uimm`: as [`Format::Csr`], with a 5-bit immediate in the place of `rs1`.
     CsrI,
 }
 
-/// Defines [Opcode] from one row per instruction: the documentation, the variant, the mnemonic,
-/// the [Format], the bits of the 32-bit encoding that are not operands, and the crate features
+/// Defines [`Opcode`] from one row per instruction: the documentation, the variant, the mnemonic,
+/// the [`Format`], the bits of the 32-bit encoding that are not operands, and the crate features
 /// the instruction requires.
 macro_rules! opcodes {
     ($(
@@ -50,7 +50,7 @@ macro_rules! opcodes {
         /// its operands.
         ///
         /// Every instruction is listed whatever features the crate is built with.
-        /// [Opcode::is_supported] tells whether the enabled features include an instruction, and
+        /// [`Opcode::is_supported`] tells whether the enabled features include an instruction, and
         /// decoding only produces the ones they do.
         #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
         #[repr(u8)]

@@ -8,19 +8,19 @@ pub use sparse::SparseMemory;
 /// An address in memory.
 pub type Address = XWord;
 
-/// The index of a page: an [Address] with the offset within the page shifted out.
+/// The index of a page: an [`Address`] with the offset within the page shifted out.
 pub type PageIndex = XWord;
 
-/// The number of [Address] bits that select a byte within a page.
+/// The number of [`Address`] bits that select a byte within a page.
 pub const PAGE_ADDRESS_SIZE: usize = 12;
 
 /// The size of a page in bytes (4 KiB).
 pub const PAGE_SIZE: usize = 1 << PAGE_ADDRESS_SIZE;
 
-/// The mask to apply to an [Address] to obtain the offset within its page.
+/// The mask to apply to an [`Address`] to obtain the offset within its page.
 pub const PAGE_ADDRESS_MASK: usize = PAGE_SIZE - 1;
 
-/// The largest [PageIndex].
+/// The largest [`PageIndex`].
 pub const MAX_PAGE_INDEX: PageIndex = Address::MAX >> PAGE_ADDRESS_SIZE;
 
 /// Returns the index of the page that contains `address`.
@@ -43,14 +43,14 @@ pub const fn page_base(page: PageIndex) -> Address {
 
 /// The address space of a hart: memory, and whatever devices are mapped next to it.
 ///
-/// An implementation needs [Memory::load] and [Memory::store]. The other methods have defaults that
-/// are built on those two.
+/// An implementation needs [`Memory::load`] and [`Memory::store`]. The other methods have defaults
+/// that are built on those two.
 ///
 /// # Accesses
 ///
 /// An access may have any alignment and may span pages, and addresses wrap around at the end
-/// of the address space. An access that the memory cannot perform returns [Memory::Error]. The hart
-/// then stops without retiring the instruction and without having changed a register. A store
+/// of the address space. An access that the memory cannot perform returns [`Memory::Error`]. The
+/// hart then stops without retiring the instruction and without having changed a register. A store
 /// that fails should not have written anything. A memory on which every access succeeds uses
 /// [Infallible](core::convert::Infallible) as its error, and the hart's checks compile to
 /// nothing.
@@ -60,11 +60,11 @@ pub const fn page_base(page: PageIndex) -> Address {
 /// The hart decodes every instruction once and keeps the decoded form, so it has to hear about
 /// writes to the bytes it decoded. It learns about them through three methods:
 ///
-/// - The hart calls [Memory::watch] for every page that holds a byte of an instruction it keeps in
-///   decoded form, before it executes the instruction.
-/// - The first write to a watched page, by [Memory::store] or [Memory::write], ends the watch and
-///   queues the page for [Memory::pop_dirty]. A store that does this returns `Ok(true)`.
-/// - The hart empties the queue with [Memory::pop_dirty] when it starts to run and after every
+/// - The hart calls [`Memory::watch`] for every page that holds a byte of an instruction it keeps
+///   in decoded form, before it executes the instruction.
+/// - The first write to a watched page, by [`Memory::store`] or [`Memory::write`], ends the watch
+///   and queues the page for [`Memory::pop_dirty`]. A store that does this returns `Ok(true)`.
+/// - The hart empties the queue with [`Memory::pop_dirty`] when it starts to run and after every
 ///   store that returned `Ok(true)`, and decodes the instructions of those pages again when it next
 ///   executes them.
 ///
@@ -131,13 +131,13 @@ pub trait Memory {
     }
 
     /// Describes a software TLB that compiled code may probe to access memory without calling
-    /// [Memory::load] and [Memory::store], or returns `None` if there is none.
+    /// [`Memory::load`] and [`Memory::store`], or returns `None` if there is none.
     ///
     /// Compiled code performs the accesses that hit the software TLB itself, so the implementation
     /// does not see them, whether they are loads or stores. An implementation therefore only
     /// describes a software TLB that serves accesses that it would perform in the same way, with no
     /// error, no side effect and no need to hear about them: the contract of
-    /// [brisc_jit::Probe::new], which is unsafe for that reason. An implementation that wraps
+    /// [`brisc_jit::Probe::new`], which is unsafe for that reason. An implementation that wraps
     /// another one must not forward its probe unless it adds none of those.
     ///
     /// The pointer must stay valid until the memory is used or moved.

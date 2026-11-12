@@ -212,7 +212,7 @@ const fn known_disagreement(word: Word, decoded: Option<Instruction>) -> bool {
     word & 0xffff == 0 || word == 0x7b20_0073
 }
 
-/// LLVM and [Instruction::decode] accept the same words as instructions.
+/// LLVM and [`Instruction::decode`] accept the same words as instructions.
 #[test]
 fn decoding_accepts_what_llvm_accepts() {
     let Some(llvm) = Llvm::find() else { return };
@@ -237,8 +237,8 @@ fn decoding_accepts_what_llvm_accepts() {
     }
 }
 
-/// LLVM assembles the text that [Instruction] displays as to the word that
-/// [Instruction::encode] returns.
+/// LLVM assembles the text that [`Instruction`] displays as to the word that
+/// [`Instruction::encode`] returns.
 #[test]
 fn encoding_agrees_with_the_llvm_assembler() {
     let Some(llvm) = Llvm::find() else { return };

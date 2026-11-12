@@ -19,7 +19,7 @@ pub enum LoadError<M> {
     Memory(M),
 }
 
-/// Loads a raw ELF file onto a [Memory].
+/// Loads a raw ELF file onto a [`Memory`].
 ///
 /// ### Takes
 /// - `memory`: The memory that the segments of the file are written to.

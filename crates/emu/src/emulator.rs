@@ -20,7 +20,7 @@ pub enum EmulationError<K, M> {
     Fault(#[from] Fault),
 
     /// The guest executed an ebreak, which the program counter is left on. To continue, advance
-    /// [Cpu::pc] past it as [Stop::Ebreak] describes.
+    /// [`Cpu::pc`] past it as [`Stop::Ebreak`] describes.
     #[error("the guest executed an ebreak")]
     Ebreak,
 
@@ -45,14 +45,14 @@ impl<K, M> From<SyscallError<K, M>> for EmulationError<K, M> {
 /// A RISC-V hart with its memory, the kernel that services its system calls, and the state that
 /// the kernel works on.
 ///
-/// - M is the [Memory] that the hart runs on, which can include devices.
-/// - K is the kernel. [Emulator::run] drives a [Kernel] and [Emulator::run_async] an [AsyncKernel].
-///   Both execute guest instructions with the same [Cpu::run] and differ only in how they wait for
-///   the kernel.
+/// - M is the [`Memory`] that the hart runs on, which can include devices.
+/// - K is the kernel. [`Emulator::run`] drives a [`Kernel`] and [`Emulator::run_async`] an
+///   [`AsyncKernel`]. Both execute guest instructions with the same [`Cpu::run`] and differ only in
+///   how they wait for the kernel.
 /// - S is the state that every system call receives. It can be anything, including a borrow.
-/// - T is the [Tracer] that sees every instruction before it executes, and is given the state S to
-///   change. The default, `()`, does not trace and costs nothing. A tracer turns the JIT compiler
-///   off, as [Cpu::run_traced] describes.
+/// - T is the [`Tracer`] that sees every instruction before it executes, and is given the state S
+///   to change. The default, `()`, does not trace and costs nothing. A tracer turns the JIT
+///   compiler off, as [`Cpu::run_traced`] describes.
 ///
 /// The hart is a public field, so its registers, program counter and configuration are there to
 /// inspect and change between runs.
@@ -139,7 +139,7 @@ impl<M: Memory, K, S, T: Tracer<M, S>> Emulator<M, K, S, T> {
     /// Executes the program until it exits, returning its exit code. Suspends whenever the
     /// kernel does.
     ///
-    /// Errors leave the emulator as they do for [Emulator::run].
+    /// Errors leave the emulator as they do for [`Emulator::run`].
     pub async fn run_async(&mut self) -> Result<XWord, EmulationError<K::Error, M::Error>>
     where
         K: AsyncKernel<S>,
@@ -308,12 +308,12 @@ mod test {
         }
     }
 
-    /// A [Memory] with RAM below [BoundedMemory::END] and nothing above it. It implements no more
-    /// of [Memory] than it has to.
+    /// A [`Memory`] with RAM below [`BoundedMemory::END`] and nothing above it. It implements no
+    /// more of [`Memory`] than it has to.
     #[derive(Default)]
     struct BoundedMemory(SparseMemory);
 
-    /// An access that reaches beyond the end of a [BoundedMemory], with its address.
+    /// An access that reaches beyond the end of a [`BoundedMemory`], with its address.
     #[derive(Debug, PartialEq, Eq)]
     struct OutOfBounds(Address);
 

@@ -9,23 +9,23 @@ use hashbrown::HashMap;
 /// The number of entries in the translation cache.
 const TLB_ENTRIES: usize = 1 << 10;
 
-/// A tag that matches no page: it is larger than [MAX_PAGE_INDEX].
+/// A tag that matches no page: it is larger than [`MAX_PAGE_INDEX`].
 ///
-/// [MAX_PAGE_INDEX]: crate::memory::MAX_PAGE_INDEX
+/// [`MAX_PAGE_INDEX`]: crate::memory::MAX_PAGE_INDEX
 const NO_PAGE: PageIndex = PageIndex::MAX;
 
 /// A cached translation from a page to the frame that backs it.
 #[derive(Debug, Clone, Copy)]
 #[repr(C)]
 struct TlbEntry {
-    /// The page this entry translates for loads, or [NO_PAGE].
+    /// The page this entry translates for loads, or [`NO_PAGE`].
     read: PageIndex,
-    /// The page this entry translates for stores, or [NO_PAGE].
+    /// The page this entry translates for stores, or [`NO_PAGE`].
     ///
     /// Set only when the page has a frame of its own and is not watched, so that the first store
     /// to an unmapped page and every store to a watched page take the slow path.
     write: PageIndex,
-    /// The position of the frame within [SparseMemory::frames].
+    /// The position of the frame within [`SparseMemory::frames`].
     frame: usize,
 }
 
@@ -39,7 +39,7 @@ struct Frame([u8; PAGE_SIZE]);
 
 const _: () = assert!(align_of::<Frame>() == PAGE_SIZE && size_of::<Frame>() == PAGE_SIZE);
 
-/// A [Memory] that is all memory, with pages mapped on first write.
+/// A [`Memory`] that is all memory, with pages mapped on first write.
 ///
 /// Every address is readable and writable, so no access fails. Memory that was never written
 /// reads as zero, and reading it does not map a page.
@@ -55,11 +55,11 @@ pub struct SparseMemory {
     pages: HashMap<PageIndex, u32>,
     /// Whether each frame's page is watched.
     watched: Vec<bool>,
-    /// Pages written while watched, not yet returned from [Memory::pop_dirty].
+    /// Pages written while watched, not yet returned from [`Memory::pop_dirty`].
     dirty: Vec<PageIndex>,
     /// The translation cache, indexed by the low bits of the page index.
     tlb: Box<[TlbEntry; TLB_ENTRIES]>,
-    /// What compiled code may use to probe [Self::tlb].
+    /// What compiled code may use to probe [`Self::tlb`].
     #[cfg(feature = "jit")]
     probe: brisc_jit::Probe,
 }

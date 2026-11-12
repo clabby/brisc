@@ -14,7 +14,7 @@ pub struct CRType {
 }
 
 impl CRType {
-    /// Decodes a [CRType] instruction from a 16-bit [HalfWord].
+    /// Decodes a [`CRType`] instruction from a 16-bit [`HalfWord`].
     pub const fn decode(instruction: HalfWord) -> Self {
         Self {
             rs1_rd: bits!(u8, instruction, 7..12),
@@ -36,7 +36,7 @@ pub struct CIType {
 }
 
 impl CIType {
-    /// Decodes a [CIType] instruction from a 16-bit [HalfWord].
+    /// Decodes a [`CIType`] instruction from a 16-bit [`HalfWord`].
     pub const fn decode(instruction: HalfWord) -> Self {
         Self {
             rs1_rd: bits!(u8, instruction, 7..12),
@@ -58,7 +58,7 @@ pub struct CSSType {
 }
 
 impl CSSType {
-    /// Decodes a [CSSType] instruction from a 16-bit [HalfWord].
+    /// Decodes a [`CSSType`] instruction from a 16-bit [`HalfWord`].
     pub const fn decode(instruction: HalfWord) -> Self {
         Self {
             rs2: bits!(u8, instruction, 2..7),
@@ -80,7 +80,7 @@ pub struct CIWType {
 }
 
 impl CIWType {
-    /// Decodes a [CIWType] instruction from a 16-bit [HalfWord].
+    /// Decodes a [`CIWType`] instruction from a 16-bit [`HalfWord`].
     pub const fn decode(instruction: HalfWord) -> Self {
         Self {
             rd: bits!(u8, instruction, 2..5),
@@ -104,7 +104,7 @@ pub struct CLType {
 }
 
 impl CLType {
-    /// Decodes a [CLType] instruction from a 16-bit [HalfWord].
+    /// Decodes a [`CLType`] instruction from a 16-bit [`HalfWord`].
     pub const fn decode(instruction: HalfWord) -> Self {
         Self {
             rd: bits!(u8, instruction, 2..5),
@@ -129,7 +129,7 @@ pub struct CSType {
 }
 
 impl CSType {
-    /// Decodes a [CSType] instruction from a 16-bit [HalfWord].
+    /// Decodes a [`CSType`] instruction from a 16-bit [`HalfWord`].
     pub const fn decode(instruction: HalfWord) -> Self {
         Self {
             rs1: bits!(u8, instruction, 7..10),
@@ -152,7 +152,7 @@ pub struct CBType {
 }
 
 impl CBType {
-    /// Decodes a [CBType] instruction from a 16-bit [HalfWord].
+    /// Decodes a [`CBType`] instruction from a 16-bit [`HalfWord`].
     pub const fn decode(instruction: HalfWord) -> Self {
         Self {
             rs1: bits!(u8, instruction, 7..10),
@@ -172,7 +172,7 @@ pub struct CJType {
 }
 
 impl CJType {
-    /// Decodes a [CJType] instruction from a 16-bit [HalfWord].
+    /// Decodes a [`CJType`] instruction from a 16-bit [`HalfWord`].
     pub const fn decode(instruction: HalfWord) -> Self {
         Self { funct3: bits!(u8, instruction, 13..16), target: bits!(HalfWord, instruction, 2..13) }
     }

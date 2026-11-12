@@ -18,7 +18,7 @@ pub struct RType {
 }
 
 impl RType {
-    /// Decodes an [RType] instruction from a 32-bit [Word].
+    /// Decodes an [`RType`] instruction from a 32-bit [`Word`].
     pub const fn decode(instruction: Word) -> Self {
         Self {
             rd: bits!(u8, instruction, 7..12),
@@ -29,7 +29,7 @@ impl RType {
         }
     }
 
-    /// Encodes the fields as a 32-bit [Word] whose opcode, the low seven bits, is zero.
+    /// Encodes the fields as a 32-bit [`Word`] whose opcode, the low seven bits, is zero.
     ///
     /// A field that is too large for its place in the word loses its upper bits.
     pub const fn encode(&self) -> Word {

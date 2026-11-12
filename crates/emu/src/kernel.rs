@@ -1,11 +1,11 @@
 //! The interface to the environment that services a guest's system calls.
 //!
-//! The processor never calls a kernel. [Cpu::run] returns [Stop::Ecall] when the guest makes a
+//! The processor never calls a kernel. [`Cpu::run`] returns [`Stop::Ecall`] when the guest makes a
 //! system call, and whoever drives the processor hands the guest's registers and its memory to a
-//! [Kernel] or an [AsyncKernel] before running it again.
+//! [`Kernel`] or an [`AsyncKernel`] before running it again.
 //!
-//! [Cpu::run]: brisc_hw::cpu::Cpu::run
-//! [Stop::Ecall]: brisc_hw::cpu::Stop::Ecall
+//! [`Cpu::run`]: brisc_hw::cpu::Cpu::run
+//! [`Stop::Ecall`]: brisc_hw::cpu::Stop::Ecall
 
 use brisc_hw::{
     cpu::Registers,
@@ -28,7 +28,7 @@ pub enum Syscall {
 ///
 /// `K` is the error of the kernel and `M` the error of the memory. A kernel can apply `?` to the
 /// result of an access to the memory, because an error of the memory converts to
-/// [SyscallError::Memory].
+/// [`SyscallError::Memory`].
 #[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyscallError<K, M> {
     /// The kernel cannot service the system call.
@@ -67,7 +67,7 @@ pub trait Kernel<S> {
 /// A kernel that may suspend while it services a system call.
 ///
 /// `S` is state that lives outside the kernel and is passed to every system call, for the kernel
-/// to read and modify. Every [Kernel] is also an [AsyncKernel] that never suspends.
+/// to read and modify. Every [`Kernel`] is also an [`AsyncKernel`] that never suspends.
 pub trait AsyncKernel<S> {
     /// The error returned when a system call cannot be serviced.
     type Error;
@@ -115,8 +115,8 @@ impl<S> Kernel<S> for () {
 /// A kernel with the two system calls that a program without an operating system needs, under
 /// the numbers that Linux gives them on RISC-V.
 ///
-/// - [MinimalKernel::EXIT] ends the program with the exit code in `a0`.
-/// - [MinimalKernel::WRITE] appends the `a2` bytes at the address in `a1` to the state of the
+/// - [`MinimalKernel::EXIT`] ends the program with the exit code in `a0`.
+/// - [`MinimalKernel::WRITE`] appends the `a2` bytes at the address in `a1` to the state of the
 ///   kernel, whatever file descriptor `a0` names, and returns their number in `a0`.
 ///
 /// The state can be any collection of bytes, such as a `Vec<u8>`.

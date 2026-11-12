@@ -47,7 +47,7 @@ impl Operand {
 
 /// Encodes the instruction with this mnemonic and these operands.
 ///
-/// The operands are the ones the [Format] of the instruction lists, in that order. An offset is
+/// The operands are the ones the [`Format`] of the instruction lists, in that order. An offset is
 /// in bytes, and the immediate of `lui` and `auipc` is the 20 bits they place above the low 12.
 /// An instruction of the A extension takes its ordering constraints as a suffix of the mnemonic:
 /// `.aq`, `.rl` or `.aqrl`.
@@ -100,7 +100,7 @@ pub const fn assemble(mnemonic: &str, operands: &[Operand]) -> Word {
 }
 
 /// Splits the mnemonic of an instruction of the A extension that ends in ordering constraints
-/// into the opcode and the constraints as [Instruction::imm] holds them.
+/// into the opcode and the constraints as [`Instruction::imm`] holds them.
 const fn split_ordering(mnemonic: &str) -> Option<(Opcode, i64)> {
     const SUFFIXES: [(&str, i32); 3] = [
         (".aqrl", Instruction::AQ | Instruction::RL),
@@ -149,7 +149,7 @@ pub const fn to_bytes<const N: usize>(words: &[Word]) -> [u8; N] {
     bytes
 }
 
-/// Encodes one instruction written in assembly language as a [Word].
+/// Encodes one instruction written in assembly language as a [`Word`].
 ///
 /// The instruction is checked and encoded when the program is compiled, so the macro can
 /// initialize constants, and a mnemonic or operand that is wrong fails the build.
@@ -158,8 +158,8 @@ pub const fn to_bytes<const N: usize>(words: &[Word]) -> [u8; N] {
 /// immediate is a constant expression of type `i64`; one that consists of a single identifier
 /// needs braces around it to tell it from a register. An address is written `offset(register)`
 /// with a literal offset, or `(register)`. Offsets of branches and jumps are in bytes from the
-/// instruction, since there are no labels. [Format] lists the operands of each
-/// kind of instruction, and [assemble] the remaining rules.
+/// instruction, since there are no labels. [`Format`] lists the operands of each
+/// kind of instruction, and [`assemble`] the remaining rules.
 ///
 /// Instructions are always encoded in 32 bits, never in the 16 bits of the C extension.
 ///
@@ -298,7 +298,7 @@ macro_rules! __rv_words {
 }
 
 /// Encodes the instruction with the mnemonic before the first comma and the
-/// [Operand]s after it.
+/// [`Operand`]s after it.
 #[doc(hidden)]
 #[macro_export]
 macro_rules! __rv_word {

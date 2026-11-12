@@ -18,7 +18,7 @@ use brisc_isa::Opcode;
 #[cfg(feature = "m")]
 use brisc_isa::{DoubleXWord, SDoubleXWord, X_LEN};
 
-/// Why [execute] returned. `E` is the error of the memory.
+/// Why [`execute`] returned. `E` is the error of the memory.
 pub(super) enum Exit<E> {
     /// Execution continues at the returned program counter, on another page or after the caller
     /// has looked at the remaining budget and at writes to watched pages.
@@ -42,13 +42,13 @@ pub(super) enum Exit<E> {
     Hot,
 }
 
-/// Matches on an [Op::code].
+/// Matches on an [`Op::code`].
 ///
 /// The first block of arms is for the codes that are not instructions. Each arm of the second
-/// block names one or more variants of [brisc_isa::Opcode] and runs its body for the two-byte
+/// block names one or more variants of [`brisc_isa::Opcode`] and runs its body for the two-byte
 /// and for the four-byte form of those instructions, with `$advance` bound to the number of
 /// slots the instruction occupies. That number is a constant in each copy of the body, which is
-/// what keeps the address of the next [Op] independent of the current one.
+/// what keeps the address of the next [`Op`] independent of the current one.
 ///
 /// The arms must cover exactly the instructions that the enabled features include.
 macro_rules! dispatch {
@@ -108,7 +108,7 @@ macro_rules! dispatch {
     }};
 }
 
-/// Defines a constant with the [Op::code] of each of the named instructions at this length.
+/// Defines a constant with the [`Op::code`] of each of the named instructions at this length.
 macro_rules! codes {
     ($length:literal, $($name:ident)+) => {
         $(
@@ -118,12 +118,12 @@ macro_rules! codes {
     };
 }
 
-/// Returns the [Op] in `slot` of `code`.
+/// Returns the [`Op`] in `slot` of `code`.
 ///
 /// The lookup needs no bounds check because the interpreter never moves `slot` out of bounds:
-/// it starts below [SLOTS]; an instruction at a slot below [SLOTS] moves it on by one or two, to
-/// at most `SLOTS + 1`; the two slots from [SLOTS] on hold the code that stops the loop without
-/// moving `slot`; and a branch or jump only moves it to a target below [SLOTS].
+/// it starts below [`SLOTS`]; an instruction at a slot below [`SLOTS`] moves it on by one or two,
+/// to at most `SLOTS + 1`; the two slots from [`SLOTS`] on hold the code that stops the loop
+/// without moving `slot`; and a branch or jump only moves it to a target below [`SLOTS`].
 #[inline(always)]
 fn op_at(code: &CodePage, slot: usize) -> Op {
     debug_assert!(slot < code.len());
@@ -139,8 +139,8 @@ fn op_at(code: &CodePage, slot: usize) -> Op {
 ///
 /// With `PRECISE` set, the budget is checked before every instruction and exactly `remaining`
 /// instructions are retired at most. Without it, the budget is only checked after control
-/// transfers, which is sound when `remaining` is at least [SLOTS]: the loop returns once fewer
-/// than [SLOTS] instructions remain, and no more than [SLOTS] instructions can execute between
+/// transfers, which is sound when `remaining` is at least [`SLOTS`]: the loop returns once fewer
+/// than [`SLOTS`] instructions remain, and no more than [`SLOTS`] instructions can execute between
 /// two checks because every instruction advances by at least one slot.
 #[allow(
     clippy::unnecessary_cast,

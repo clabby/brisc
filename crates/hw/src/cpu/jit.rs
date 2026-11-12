@@ -1,8 +1,8 @@
 //! The connection between the interpreter and the JIT compiler.
 //!
 //! The interpreter counts how often control flows back to each slot of a page. When the count of a
-//! slot reaches the threshold of the [JitConfig], the interpreter returns to [Cpu::run], which has
-//! the region of the page that starts at the slot compiled and, from then on, runs the compiled
+//! slot reaches the threshold of the [`JitConfig`], the interpreter returns to [`Cpu::run`], which
+//! has the region of the page that starts at the slot compiled and, from then on, runs the compiled
 //! code whenever control flows back to the slot or to any other place that the region can be
 //! entered. The compiled code leaves for the interpreter wherever it meets an instruction that it
 //! does not contain.
@@ -124,8 +124,8 @@ struct Pending {
 /// The regions of a hart and the means to compile them.
 pub(super) struct JitState {
     config: Option<JitConfig>,
-    /// The compilers that run on the thread of the hart, for [Quality::Quick] and [Quality::Fast].
-    /// A compiler that the host does not support is None.
+    /// The compilers that run on the thread of the hart, for [`Quality::Quick`] and
+    /// [`Quality::Fast`]. A compiler that the host does not support is None.
     inline: [Option<Option<Jit>>; 2],
     /// The thread that compiles regions in the background.
     worker: Option<Background>,
@@ -137,8 +137,8 @@ pub(super) struct JitState {
     generations: Vec<u64>,
     regions: Vec<Compiled>,
     /// What is known about the region that starts at each slot of each page of the code cache:
-    /// [UNKNOWN], [FAILED], [PENDING], or [COMPILED] plus the index in [Self::regions] of the
-    /// region.
+    /// [`UNKNOWN`], [`FAILED`], [`PENDING`], or [`COMPILED`] plus the index in [`Self::regions`]
+    /// of the region.
     table: Vec<Box<[u32; SLOTS]>>,
     stats: JitStats,
 }
@@ -309,7 +309,7 @@ fn instruction(code: &CodePage, slot: usize) -> Option<Instruction> {
 
 impl Cpu {
     /// Sets how the hart uses the JIT compiler, or turns the JIT off with None. A hart starts
-    /// with the default [JitConfig].
+    /// with the default [`JitConfig`].
     pub fn set_jit(&mut self, config: Option<JitConfig>) {
         self.jit.set_config(config);
     }

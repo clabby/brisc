@@ -12,12 +12,12 @@ pub struct UType {
 }
 
 impl UType {
-    /// Decodes an [UType] instruction from a 32-bit [Word].
+    /// Decodes an [`UType`] instruction from a 32-bit [`Word`].
     pub const fn decode(instruction: Word) -> Self {
         Self { rd: bits!(u8, instruction, 7..12), imm: (instruction & 0xffff_f000) as i32 }
     }
 
-    /// Encodes the fields as a 32-bit [Word] whose opcode, the low seven bits, is zero.
+    /// Encodes the fields as a 32-bit [`Word`] whose opcode, the low seven bits, is zero.
     ///
     /// A register that is too large for its place in the word loses its upper bits, and the
     /// immediate its low twelve bits.

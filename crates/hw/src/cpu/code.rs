@@ -12,7 +12,7 @@ use hashbrown::HashMap;
 /// The number of instruction slots in a page: an instruction can start at every second byte.
 pub(super) const SLOTS: usize = PAGE_SIZE / 2;
 
-/// Returns the position within its [CodePage] of the slot for the instruction at `address`.
+/// Returns the position within its [`CodePage`] of the slot for the instruction at `address`.
 #[inline(always)]
 pub(super) const fn slot_of(address: Address) -> usize {
     page_offset(address) >> 1
@@ -20,7 +20,7 @@ pub(super) const fn slot_of(address: Address) -> usize {
 
 /// The decoded form of one page of guest memory.
 ///
-/// The [SLOTS] instruction slots are followed by two [Op::PAGE_END] slots, which is as far as
+/// The [`SLOTS`] instruction slots are followed by two [`Op::PAGE_END`] slots, which is as far as
 /// the last instruction of the page can advance.
 pub(super) type CodePage = [Op; SLOTS + 2];
 
@@ -28,12 +28,12 @@ pub(super) type CodePage = [Op; SLOTS + 2];
 #[derive(Default)]
 pub(super) struct CodeCache {
     pub(super) pages: Vec<Box<CodePage>>,
-    /// How often control has flowed back to each slot of each page in [Self::pages].
+    /// How often control has flowed back to each slot of each page in [`Self::pages`].
     #[cfg(feature = "jit")]
     pub(super) counters: Vec<Box<[u16; SLOTS]>>,
-    /// The position in [Self::pages] of each page that has been decoded from.
+    /// The position in [`Self::pages`] of each page that has been decoded from.
     index: HashMap<PageIndex, usize>,
-    /// The page most recently looked up and its position in [Self::pages].
+    /// The page most recently looked up and its position in [`Self::pages`].
     last: Option<(PageIndex, usize)>,
 }
 

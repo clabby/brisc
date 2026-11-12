@@ -35,10 +35,10 @@ pub const fn is_compressed(parcel: Word) -> bool {
     parcel & 0b11 != 0b11
 }
 
-/// A decoded instruction: an [Opcode] with its operands.
+/// A decoded instruction: an [`Opcode`] with its operands.
 ///
 /// A 16-bit instruction of the C extension decodes to the same opcode and operands as the 32-bit
-/// instruction it abbreviates; only [Instruction::length] tells the two apart.
+/// instruction it abbreviates; only [`Instruction::length`] tells the two apart.
 ///
 /// An operand that an instruction does not have is zero, so two instructions are equal exactly
 /// when they have the same encoding.
@@ -50,33 +50,33 @@ pub struct Instruction {
     pub rd: u8,
     /// The first source register.
     ///
-    /// For [Opcode::Csrrwi], [Opcode::Csrrsi] and [Opcode::Csrrci] this is not a register but the
-    /// 5-bit immediate that is written to the CSR.
+    /// For [`Opcode::Csrrwi`], [`Opcode::Csrrsi`] and [`Opcode::Csrrci`] this is not a register
+    /// but the 5-bit immediate that is written to the CSR.
     pub rs1: u8,
     /// The second source register.
     pub rs2: u8,
     /// The immediate, sign-extended. Every immediate of the supported instruction sets fits in
     /// 32 bits.
     ///
-    /// - Loads, stores, branches, [Opcode::Jal] and [Opcode::Jalr]: the offset in bytes.
-    /// - [Opcode::Lui] and [Opcode::Auipc]: the value the instruction loads or adds, a multiple of
-    ///   4096.
+    /// - Loads, stores, branches, [`Opcode::Jal`] and [`Opcode::Jalr`]: the offset in bytes.
+    /// - [`Opcode::Lui`] and [`Opcode::Auipc`]: the value the instruction loads or adds, a
+    ///   multiple of 4096.
     /// - Shifts by an immediate: the shift amount.
     /// - CSR instructions: the address of the CSR, from 0 to 4095.
-    /// - Instructions of the A extension: the ordering constraints, [Instruction::AQ] and
-    ///   [Instruction::RL].
-    /// - [Opcode::Fence] and [Opcode::FenceI]: the 12 bits above the `rs1` field, which hold the
-    ///   predecessor and successor sets of a `fence`.
+    /// - Instructions of the A extension: the ordering constraints, [`Instruction::AQ`] and
+    ///   [`Instruction::RL`].
+    /// - [`Opcode::Fence`] and [`Opcode::FenceI`]: the 12 bits above the `rs1` field, which hold
+    ///   the predecessor and successor sets of a `fence`.
     pub imm: i32,
     /// The length of the instruction in bytes: 2 or 4.
     pub length: u8,
 }
 
 impl Instruction {
-    /// The bit of [Instruction::imm] that is the `aq` bit of an instruction of the A extension.
+    /// The bit of [`Instruction::imm`] that is the `aq` bit of an instruction of the A extension.
     pub const AQ: i32 = 0b10;
 
-    /// The bit of [Instruction::imm] that is the `rl` bit of an instruction of the A extension.
+    /// The bit of [`Instruction::imm`] that is the `rl` bit of an instruction of the A extension.
     pub const RL: i32 = 0b01;
 
     /// Decodes the instruction in the low bits of `word`.
@@ -418,7 +418,7 @@ impl TryFrom<Word> for Instruction {
 }
 
 /// Writes the instruction in assembly language, in the form that [rv!](crate::rv) reads: the
-/// mnemonic and the operands of its [Format], with registers by the names of the standard
+/// mnemonic and the operands of its [`Format`], with registers by the names of the standard
 /// calling convention and immediates in decimal.
 impl fmt::Display for Instruction {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -465,7 +465,7 @@ mod test {
         assert!(Instruction::decode(0b000_00000001_001_00).is_ok());
     }
 
-    /// Together with the check inside [Instruction::encode], this makes decoding and encoding
+    /// Together with the check inside [`Instruction::encode`], this makes decoding and encoding
     /// inverses of each other: no two words decode to the same instruction, and decoding
     /// keeps every bit of a word that is an instruction.
     #[test]

@@ -40,10 +40,10 @@ pub use trace::{Step, Tracer};
 /// The hart executes the unprivileged instructions of the enabled instruction sets. Of the
 /// privileged architecture it models only what programs written for a bare hart run into:
 ///
-/// - `ecall` and `ebreak` stop [Cpu::run] with [Stop::Ecall] and [Stop::Ebreak], for whoever drives
-///   the hart to act on.
+/// - `ecall` and `ebreak` stop [`Cpu::run`] with [`Stop::Ecall`] and [`Stop::Ebreak`], for whoever
+///   drives the hart to act on.
 /// - Every control and status register reads as zero. Writes are ignored, except that an
-///   instruction that writes to a read-only register is a [Fault::ReadOnlyCsr]. `unimp`, which
+///   instruction that writes to a read-only register is a [`Fault::ReadOnlyCsr`]. `unimp`, which
 ///   compilers emit where execution must not continue, is such an instruction.
 /// - `mret`, `sret`, `wfi` and `sfence.vma` do nothing, because there are no privilege levels,
 ///   interrupts or address translation. `fence` and `fence.i` do nothing either: there is one hart,
@@ -82,19 +82,19 @@ impl Cpu {
     }
 
     /// Executes instructions from `memory` until `budget` of them have been retired, or until an
-    /// `ecall`, an `ebreak`, a [Fault] or an error of the memory stops execution earlier.
+    /// `ecall`, an `ebreak`, a [`Fault`] or an error of the memory stops execution earlier.
     ///
     /// The instructions that the hart has decoded stay coherent with `memory` as long as the memory
-    /// reports the writes to them, as [Memory] describes.
+    /// reports the writes to them, as [`Memory`] describes.
     pub fn run<M: Memory>(&mut self, memory: &mut M, budget: u64) -> Stop<M::Error> {
         self.run_traced(memory, budget, &mut (), &mut ())
     }
 
-    /// Does what [Cpu::run] does, and shows every instruction to `tracer` before executing it, with
-    /// `ctx`, which the hart does not look at.
+    /// Does what [`Cpu::run`] does, and shows every instruction to `tracer` before executing it,
+    /// with `ctx`, which the hart does not look at.
     ///
     /// The instructions are interpreted one by one, even if the hart would compile them without a
-    /// tracer. A `tracer` that does not trace, like `()`, makes this the same as [Cpu::run].
+    /// tracer. A `tracer` that does not trace, like `()`, makes this the same as [`Cpu::run`].
     pub fn run_traced<M: Memory, C, T: Tracer<M, C>>(
         &mut self,
         memory: &mut M,

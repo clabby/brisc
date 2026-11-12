@@ -2,10 +2,10 @@
 //!
 //! This crate is an experiment. The interpreter in `brisc-hw` decodes a page of guest code into
 //! slots, one for every two bytes of the page. When control keeps flowing back to a slot, the
-//! interpreter hands this crate a [Request]: the page, the slot, and a way to look at the decoded
-//! instructions of the page. [Jit::compile] follows the control flow from that slot to find a
-//! _region_ of the page, translates it to machine code and returns it as a [Region]. A
-//! [Background] does the same on a thread of its own.
+//! interpreter hands this crate a [`Request`]: the page, the slot, and a way to look at the decoded
+//! instructions of the page. [`Jit::compile`] follows the control flow from that slot to find a
+//! _region_ of the page, translates it to machine code and returns it as a [`Region`]. A
+//! [`Background`] does the same on a thread of its own.
 //!
 //! # Regions
 //!
@@ -15,8 +15,8 @@
 //! loop of arithmetic runs without any access to the register file in memory.
 //!
 //! A region is entered at its first instruction or at an instruction that a jump back goes to,
-//! which are the places that an interpreter that has left the region returns to: [Region::entries]
-//! lists them.
+//! which are the places that an interpreter that has left the region returns to:
+//! [`Region::entries`] lists them.
 //!
 //! Calls and returns do not end a region. A jump through a register that the instruction before
 //! it set with `auipc`, which is how a call to a function in the same binary is written, has a
@@ -30,20 +30,20 @@
 //!
 //! # Running a region
 //!
-//! A region is a function that takes the register file and a [Ctx]. It runs until it leaves the
-//! region, writes the registers that it changed back to the register file, and records in the [Ctx]
-//! the number of instructions that it retired and the program counter at which the interpreter
-//! continues. The instruction at that program counter has not been executed.
+//! A region is a function that takes the register file and a [`Ctx`]. It runs until it leaves the
+//! region, writes the registers that it changed back to the register file, and records in the
+//! [`Ctx`] the number of instructions that it retired and the program counter at which the
+//! interpreter continues. The instruction at that program counter has not been executed.
 //!
 //! To retire exactly the instructions that the interpreter would, a region must only be entered
-//! with a budget of at least [Region::max_retire] instructions. A region can only run more than
+//! with a budget of at least [`Region::max_retire`] instructions. A region can only run more than
 //! that many instructions by flowing back to an earlier instruction, so it checks the budget at
-//! each such jump and leaves for the interpreter if fewer than [Region::max_retire] instructions
+//! each such jump and leaves for the interpreter if fewer than [`Region::max_retire`] instructions
 //! remain.
 //!
 //! # Memory
 //!
-//! Loads and stores are done in the generated code through the software TLB that a [Probe]
+//! Loads and stores are done in the generated code through the software TLB that a [`Probe`]
 //! describes. An access that the software TLB does not serve is not done by the region: the region
 //! leaves before the instruction, and the interpreter executes it, with all the cases that it
 //! handles: unmapped and watched pages, accesses across pages, and errors of the memory. A region
@@ -97,26 +97,26 @@ pub const FRAME_SIZE: i64 = 4096;
 /// How much effort the compiler puts into the code of a region.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Quality {
-    /// Compile as fast as possible. The code runs about a third slower than [Quality::Fast]'s
+    /// Compile as fast as possible. The code runs about a third slower than [`Quality::Fast`]'s
     /// and takes about a third of the time to generate.
     Quick,
-    /// Optimize, which takes several times as long as [Quality::Quick].
+    /// Optimize, which takes several times as long as [`Quality::Quick`].
     Fast,
 }
 
 /// A software TLB that generated code can probe to access memory without a call.
 ///
 /// The entry for a page is at index page % TLB_ENTRIES of the array that the probe's `tlb`
-/// points to. An entry is [TLB_ENTRY_SIZE] bytes, with the three fields at the offsets above. If
+/// points to. An entry is [`TLB_ENTRY_SIZE`] bytes, with the three fields at the offsets above. If
 /// the tag for the kind of access is the index of the page and the access does not cross the end
 /// of the page, the bytes of the access are at the offset within the page in the frame that
-/// [TLB_FRAME] names; frame n begins [FRAME_SIZE] times n bytes after the probe's `frames`.
+/// [`TLB_FRAME`] names; frame n begins [`FRAME_SIZE`] times n bytes after the probe's `frames`.
 ///
 /// Generated code reads and writes memory through the probe without asking the memory, so a probe
 /// can only describe a software TLB that serves exactly the accesses that the memory would perform
 /// the same way: with no error and no side effect, and without letting a store reach a page
 /// that the memory has to hear about. That is why a probe can only be made with the unsafe
-/// [Probe::new].
+/// [`Probe::new`].
 ///
 /// Making a probe without `unsafe` does not compile:
 ///
@@ -137,7 +137,7 @@ impl Probe {
     ///
     /// # Safety
     ///
-    /// - tlb must point to [TLB_ENTRIES] entries laid out as described above, and frames to the
+    /// - tlb must point to [`TLB_ENTRIES`] entries laid out as described above, and frames to the
     ///   frames that they name, as long as the probe is used. The owner of the memory makes a new
     ///   probe whenever the frames move.
     /// - A hit in the software TLB must be an access that the memory would perform in the same way,
@@ -188,11 +188,11 @@ pub struct Request<'a> {
 
 /// A compiled region.
 ///
-/// The code lives as long as the [Jit] that compiled it. A [Region] must not be run after that
-/// [Jit] is dropped.
+/// The code lives as long as the [`Jit`] that compiled it. A [`Region`] must not be run after that
+/// [`Jit`] is dropped.
 #[derive(Clone, Debug)]
 pub struct Region {
-    /// The code. It takes the register file, a context and the index in [Region::entries] of the
+    /// The code. It takes the register file, a context and the index in [`Region::entries`] of the
     /// instruction to start at.
     pub entry: Entry,
     /// The slots at which the region can be entered, in ascending order: its first instruction
@@ -206,7 +206,7 @@ pub struct Region {
 
 /// Compiles regions for the host.
 ///
-/// The code of the regions is released when the [Jit] is dropped, not before: a region that is
+/// The code of the regions is released when the [`Jit`] is dropped, not before: a region that is
 /// replaced or no longer wanted keeps its code until then.
 #[allow(missing_debug_implementations)]
 pub struct Jit {
@@ -240,7 +240,7 @@ impl Jit {
         })
     }
 
-    /// Translates the region that [Request] describes, or returns None if the instruction at
+    /// Translates the region that [`Request`] describes, or returns None if the instruction at
     /// its header is not one that regions contain.
     pub fn compile(&mut self, request: &Request<'_>) -> Option<Region> {
         let shape = Shape::discover(request)?;
@@ -289,7 +289,7 @@ impl Drop for Jit {
 /// A request for a compiler thread, which owns what it needs.
 #[derive(Debug)]
 pub struct Job {
-    /// Identifies the job in its [Done].
+    /// Identifies the job in its [`Done`].
     pub id: u64,
     /// The quality of the code.
     pub quality: Quality,
@@ -297,16 +297,16 @@ pub struct Job {
     pub base: u64,
     /// The slot at which the region starts.
     pub header: usize,
-    /// See [Request::max_instructions].
+    /// See [`Request::max_instructions`].
     pub max_instructions: usize,
-    /// The instruction in each slot of the page, as for [Request::instruction].
+    /// The instruction in each slot of the page, as for [`Request::instruction`].
     pub instructions: Vec<Option<Instruction>>,
 }
 
-/// The result of a [Job].
+/// The result of a [`Job`].
 #[derive(Debug, Clone)]
 pub struct Done {
-    /// The [Job::id].
+    /// The [`Job::id`].
     pub id: u64,
     /// The region, or None if no region can start at the header.
     pub region: Option<Region>,
@@ -314,11 +314,11 @@ pub struct Done {
     pub compile_time: std::time::Duration,
 }
 
-/// A thread that compiles [Job]s while the program keeps running.
+/// A thread that compiles [`Job`]s while the program keeps running.
 ///
-/// The thread has a [Jit] for each [Quality], and the regions that it compiles are valid until the
-/// [Background] is dropped, which lets the thread end and release their code. A thread that is
-/// in the middle of a job finishes that job first.
+/// The thread has a [`Jit`] for each [`Quality`], and the regions that it compiles are valid until
+/// the [`Background`] is dropped, which lets the thread end and release their code. A thread that
+/// is in the middle of a job finishes that job first.
 #[derive(Debug)]
 pub struct Background {
     jobs: std::sync::mpsc::Sender<Job>,
@@ -650,7 +650,7 @@ struct Lowering<'a, 'b> {
     retired: Variable,
     regs: Value,
     ctx: Value,
-    /// The value of [Ctx::budget] minus the number of instructions of the region.
+    /// The value of [`Ctx::budget`] minus the number of instructions of the region.
     limit: Value,
     /// The software TLB, if the region probes it.
     tlb: Option<Value>,
@@ -852,7 +852,7 @@ impl<'a, 'b> Lowering<'a, 'b> {
         }
     }
 
-    /// Generates the blocks that [Self::edge] has handed out.
+    /// Generates the blocks that [`Self::edge`] has handed out.
     fn lower_edges(&mut self) {
         for Edge { block, go, pc } in core::mem::take(&mut self.edges) {
             self.builder.switch_to_block(block);

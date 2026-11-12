@@ -16,7 +16,7 @@ pub struct SType {
 }
 
 impl SType {
-    /// Decodes an [SType] instruction from a 32-bit [Word].
+    /// Decodes an [`SType`] instruction from a 32-bit [`Word`].
     pub const fn decode(instruction: Word) -> Self {
         Self {
             funct3: bits!(u8, instruction, 12..15),
@@ -27,7 +27,7 @@ impl SType {
         }
     }
 
-    /// Encodes the fields as a 32-bit [Word] whose opcode, the low seven bits, is zero.
+    /// Encodes the fields as a 32-bit [`Word`] whose opcode, the low seven bits, is zero.
     ///
     /// A field that is too large for its place in the word loses its upper bits.
     pub const fn encode(&self) -> Word {

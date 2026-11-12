@@ -4,27 +4,27 @@ use brisc_isa::InstructionDecodeError;
 use core::convert::Infallible;
 use thiserror::Error;
 
-/// The reason [Cpu::run] returned.
+/// The reason [`Cpu::run`] returned.
 ///
 /// `E` is the error of the memory that the hart ran on.
 ///
-/// [Cpu::run]: super::Cpu::run
+/// [`Cpu::run`]: super::Cpu::run
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stop<E = Infallible> {
     /// The instruction at the program counter is an `ecall`.
     ///
     /// It counts as retired, and the program counter still points at it: to continue after
-    /// servicing the call, advance [Cpu::pc] by four bytes.
+    /// servicing the call, advance [`Cpu::pc`] by four bytes.
     ///
-    /// [Cpu::pc]: super::Cpu::pc
+    /// [`Cpu::pc`]: super::Cpu::pc
     Ecall,
     /// The instruction at the program counter is an `ebreak`.
     ///
     /// It has not been retired and has changed no state. To continue after it, advance
-    /// [Cpu::pc] by the length of the instruction: two bytes if it is a `c.ebreak`, four
+    /// [`Cpu::pc`] by the length of the instruction: two bytes if it is a `c.ebreak`, four
     /// otherwise.
     ///
-    /// [Cpu::pc]: super::Cpu::pc
+    /// [`Cpu::pc`]: super::Cpu::pc
     Ebreak,
     /// The requested number of instructions has been retired.
     Budget,

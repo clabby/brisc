@@ -2,9 +2,9 @@
 
 use thiserror::Error;
 
-/// An error that occurs when decoding an [Instruction].
+/// An error that occurs when decoding an [`Instruction`].
 ///
-/// [Instruction]: crate::Instruction
+/// [`Instruction`]: crate::Instruction
 #[derive(Error, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InstructionDecodeError {
     /// No instruction of the enabled instruction sets has this opcode: the low seven bits of a

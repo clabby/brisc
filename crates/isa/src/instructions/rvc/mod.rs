@@ -12,7 +12,7 @@ pub use types::*;
 /// allowing for 8 possible register designations.
 pub const C_REG_OFFSET: u8 = 8;
 
-/// Maps a compressed register index to a regular register index, by adding [C_REG_OFFSET].
+/// Maps a compressed register index to a regular register index, by adding [`C_REG_OFFSET`].
 /// ┌─────┬─────┬─────┬─────┬─────┬─────┬─────┬─────┐
 /// │ 000 │ 001 │ 010 │ 011 │ 100 │ 101 │ 110 │ 111 │
 /// ├─────┼─────┼─────┼─────┼─────┼─────┼─────┼─────┤
@@ -32,7 +32,7 @@ macro_rules! tri {
     };
 }
 
-/// Builds the [Instruction] that a 16-bit instruction expands to.
+/// Builds the [`Instruction`] that a 16-bit instruction expands to.
 const fn expansion(opcode: Opcode, rd: u8, rs1: u8, rs2: u8, imm: i32) -> Instruction {
     Instruction { opcode, rd, rs1, rs2, imm, length: 2 }
 }
@@ -59,7 +59,7 @@ pub enum CompressedInstruction {
 }
 
 impl CompressedInstruction {
-    /// Decodes a [CompressedInstruction] from a 16-bit [HalfWord].
+    /// Decodes a [`CompressedInstruction`] from a 16-bit [`HalfWord`].
     pub const fn decode(instruction: HalfWord) -> Result<Self, InstructionDecodeError> {
         let opcode = instruction & 0b11;
         match opcode {
@@ -70,7 +70,7 @@ impl CompressedInstruction {
         }
     }
 
-    /// Maps the [CompressedInstruction] to the [Instruction] it abbreviates.
+    /// Maps the [`CompressedInstruction`] to the [`Instruction`] it abbreviates.
     pub const fn expand(self) -> Instruction {
         match self {
             Self::C0(c0) => c0.expand(),
@@ -98,7 +98,7 @@ pub enum C0 {
 }
 
 impl C0 {
-    /// Decodes a [C0] instruction from a 16-bit [HalfWord].
+    /// Decodes a [`C0`] instruction from a 16-bit [`HalfWord`].
     pub const fn decode(instruction: HalfWord) -> Result<Self, InstructionDecodeError> {
         let funct3 = bits!(u8, instruction, 13..16);
         match funct3 {
@@ -117,7 +117,7 @@ impl C0 {
         }
     }
 
-    /// Maps the compressed instruction to the [Instruction] it abbreviates.
+    /// Maps the compressed instruction to the [`Instruction`] it abbreviates.
     pub const fn expand(self) -> Instruction {
         match self {
             // C.ADDI4SPN expands to `addi rd', x2, nzuimm[9:2]`
@@ -193,7 +193,7 @@ pub enum C1 {
 }
 
 impl C1 {
-    /// Decodes a [C1] instruction from a 16-bit [HalfWord].
+    /// Decodes a [`C1`] instruction from a 16-bit [`HalfWord`].
     pub const fn decode(instruction: HalfWord) -> Result<Self, InstructionDecodeError> {
         let funct3 = bits!(u8, instruction, 13..16);
         let ci = CIType::decode(instruction);
@@ -221,7 +221,7 @@ impl C1 {
         }
     }
 
-    /// Maps the compressed instruction to the [Instruction] it abbreviates.
+    /// Maps the compressed instruction to the [`Instruction`] it abbreviates.
     pub const fn expand(self) -> Instruction {
         match self {
             // C.ADDI expands to `addi rd, rd, imm[5:0]`
@@ -287,7 +287,7 @@ const fn cb_immediate(cb: CBType) -> i32 {
     twiddle!(i32, cb.offset, 7..8, 0..5)
 }
 
-/// Sub-functions of the [C1] `4` funct3.
+/// Sub-functions of the [`C1`] `4` funct3.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum C1SubFunct {
     /// C.SRLI instruction.
@@ -313,7 +313,7 @@ pub enum C1SubFunct {
 }
 
 impl C1SubFunct {
-    /// Decodes a [C1SubFunct] instruction from a 16-bit [HalfWord].
+    /// Decodes a [`C1SubFunct`] instruction from a 16-bit [`HalfWord`].
     pub const fn decode(instruction: HalfWord) -> Result<Self, InstructionDecodeError> {
         let funct6_low = bits!(u8, instruction, 10..12);
         let bit_12 = bits!(u8, instruction, 12..13);
@@ -344,7 +344,7 @@ impl C1SubFunct {
         }
     }
 
-    /// Maps the compressed instruction to the [Instruction] it abbreviates.
+    /// Maps the compressed instruction to the [`Instruction`] it abbreviates.
     pub const fn expand(self) -> Instruction {
         // All of these have `rd'` as their destination and first source.
         let (opcode, rd, rs2, imm) = match self {
@@ -394,7 +394,7 @@ pub enum C2 {
 }
 
 impl C2 {
-    /// Decodes a [C2] instruction from a 16-bit [HalfWord].
+    /// Decodes a [`C2`] instruction from a 16-bit [`HalfWord`].
     pub const fn decode(instruction: HalfWord) -> Result<Self, InstructionDecodeError> {
         let funct3 = bits!(u8, instruction, 13..16);
         let ci = CIType::decode(instruction);
@@ -418,7 +418,7 @@ impl C2 {
         }
     }
 
-    /// Maps the compressed instruction to the [Instruction] it abbreviates.
+    /// Maps the compressed instruction to the [`Instruction`] it abbreviates.
     pub const fn expand(self) -> Instruction {
         match self {
             // C.SLLI expands to `slli rd, rd, shamt[5:0]`
@@ -462,7 +462,7 @@ impl C2 {
     }
 }
 
-/// Sub-functions of the [C2] `4` funct3.
+/// Sub-functions of the [`C2`] `4` funct3.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum C2SubFunct {
     /// C.JR instruction.
@@ -478,7 +478,7 @@ pub enum C2SubFunct {
 }
 
 impl C2SubFunct {
-    /// Decodes a [C2SubFunct] instruction from a 16-bit [HalfWord].
+    /// Decodes a [`C2SubFunct`] instruction from a 16-bit [`HalfWord`].
     pub const fn decode(instruction: HalfWord) -> Result<Self, InstructionDecodeError> {
         let cr = CRType::decode(instruction);
 
@@ -494,7 +494,7 @@ impl C2SubFunct {
         }
     }
 
-    /// Maps the compressed instruction to the [Instruction] it abbreviates.
+    /// Maps the compressed instruction to the [`Instruction`] it abbreviates.
     pub const fn expand(self) -> Instruction {
         match self {
             // C.JR expands to `jalr x0, 0(rs1)`

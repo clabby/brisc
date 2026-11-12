@@ -108,7 +108,7 @@ impl TestProgram {
 ///
 /// The program is run with the default configuration of the emulator, with an asynchronous kernel
 /// that suspends on every system call, and in slices of a few instruction budgets. All runs must
-/// retire the same instructions. The last three runs are deterministic: see [deterministic].
+/// retire the same instructions. The last three runs are deterministic: see [`deterministic`].
 pub fn run_riscv_test(test_path: &PathBuf) -> u64 {
     let elf = fs::read(test_path).unwrap();
     let instructions = TestProgram::load(&elf).run();
@@ -175,7 +175,7 @@ fn run_in_slices(elf: &[u8], budget: u64) -> u64 {
     }
 }
 
-/// A [Tracer] that checks the order of the instructions and counts them.
+/// A [`Tracer`] that checks the order of the instructions and counts them.
 #[derive(Default, Debug)]
 struct CountingTracer {
     /// The number of instructions traced.
@@ -189,7 +189,7 @@ impl Tracer<SparseMemory, Vec<u8>> for CountingTracer {
     }
 }
 
-/// A [MinimalKernel] that suspends once before it services each system call.
+/// A [`MinimalKernel`] that suspends once before it services each system call.
 #[derive(Default, Debug)]
 struct SuspendingKernel {
     /// The number of times the kernel has suspended.

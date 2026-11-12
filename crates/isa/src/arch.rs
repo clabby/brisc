@@ -2,19 +2,19 @@
 
 use cfg_if::cfg_if;
 
-/// The mask for a [Byte].
+/// The mask for a [`Byte`].
 pub const BYTE_MASK: XWord = 0xFF;
 
-/// The mask for a [HalfWord].
+/// The mask for a [`HalfWord`].
 pub const HALF_WORD_MASK: XWord = 0xFFFF;
 
-/// The mask for a [Word].
+/// The mask for a [`Word`].
 pub const WORD_MASK: XWord = 0xFFFF_FFFF;
 
-/// The mask for a [DoubleWord].
+/// The mask for a [`DoubleWord`].
 pub const DOUBLE_WORD_MASK: DoubleWord = 0xFFFF_FFFF_FFFF_FFFF;
 
-/// The mask for a [QuadWord].
+/// The mask for a [`QuadWord`].
 pub const QUAD_WORD_MASK: QuadWord = 0xFFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF;
 
 /// A byte.
@@ -52,7 +52,7 @@ cfg_if! {
         /// A type alias for a signed value that is double the width of the architecture's word (128-bit).
         pub type SDoubleXWord = i128;
 
-        /// An atomic type of size [X_LEN].
+        /// An atomic type of size [`X_LEN`].
         pub type AtomicXWord = core::sync::atomic::AtomicU64;
     } else {
         /// X-LEN describes the width of the architecture's word.
@@ -73,7 +73,7 @@ cfg_if! {
         /// A type alias for a signed value that is double the width of the architecture's word (64-bit).
         pub type SDoubleXWord = i64;
 
-        /// An atomic type of size [X_LEN].
+        /// An atomic type of size [`X_LEN`].
         pub type AtomicXWord = core::sync::atomic::AtomicU32;
     }
 }
@@ -182,7 +182,7 @@ pub const REGISTER_NAMES: [&str; 32] = [
 ];
 
 /// Returns the index of the integer register called `name`: `x0` to `x31`, one of the
-/// [REGISTER_NAMES], or `fp`, the other name of `s0`.
+/// [`REGISTER_NAMES`], or `fp`, the other name of `s0`.
 pub const fn register_index(name: &str) -> Option<u8> {
     match name.as_bytes() {
         b"fp" => return Some(REG_S0_FP as u8),
