@@ -5,7 +5,7 @@ use crate::{
     Emulator,
 };
 use brisc_hw::{
-    cpu::{Registers, Stop},
+    cpu::{Registers, Step, Stop, Tracer},
     memory::{Memory, SparseMemory},
     XWord, REG_A7,
 };
@@ -120,6 +120,13 @@ pub fn run_riscv_test(test_path: &PathBuf) -> u64 {
     assert!(emu.kernel.suspensions > 0);
     tracing::info!(target: "test-runner", "output: {}", String::from_utf8_lossy(&emu.take_ctx()));
 
+    // A tracer sees each retired instruction once and in order, and does not change the run.
+    let mut emu = load(MinimalKernel, &elf).with_tracer(CountingTracer::default());
+    assert_eq!(emu.run(), Ok(0));
+    assert_eq!(emu.cpu.instret, instructions);
+    // Every instruction is traced once, including each ecall.
+    assert_eq!(emu.tracer.traced, instructions);
+
     // The budgets surround the number of instructions the interpreter can run between checks of
     // its budget, which is what separates its exact and its fast mode.
     for budget in [1, 3, 2047, 2049] {
@@ -165,6 +172,20 @@ fn run_in_slices(elf: &[u8], budget: u64) -> u64 {
             Stop::Ebreak => panic!("ebreak"),
             Stop::Memory(error) => match error {},
         }
+    }
+}
+
+/// A [Tracer] that checks the order of the instructions and counts them.
+#[derive(Default, Debug)]
+struct CountingTracer {
+    /// The number of instructions traced.
+    traced: u64,
+}
+
+impl Tracer<SparseMemory, Vec<u8>> for CountingTracer {
+    fn trace(&mut self, _: &mut Vec<u8>, _: &SparseMemory, _: &Registers, step: &Step) {
+        assert_eq!(step.instret, self.traced);
+        self.traced += 1;
     }
 }
 

@@ -5,7 +5,7 @@ use crate::{
     kernel::{AsyncKernel, Kernel, Syscall, SyscallError},
 };
 use brisc_hw::{
-    cpu::{Cpu, Fault, Stop},
+    cpu::{Cpu, Fault, Stop, Tracer},
     memory::Memory,
     XWord, REG_A7,
 };
@@ -50,11 +50,14 @@ impl<K, M> From<SyscallError<K, M>> for EmulationError<K, M> {
 ///   Both execute guest instructions with the same [Cpu::run] and differ only in how they wait for
 ///   the kernel.
 /// - S is the state that every system call receives. It can be anything, including a borrow.
+/// - T is the [Tracer] that sees every instruction before it executes, and is given the state S to
+///   change. The default, `()`, does not trace and costs nothing. A tracer turns the JIT compiler
+///   off, as [Cpu::run_traced] describes.
 ///
 /// The hart is a public field, so its registers, program counter and configuration are there to
 /// inspect and change between runs.
 #[derive(Debug)]
-pub struct Emulator<M, K, S = ()> {
+pub struct Emulator<M, K, S = (), T = ()> {
     /// The hart.
     pub cpu: Cpu,
     /// The memory of the hart, with any devices.
@@ -63,12 +66,23 @@ pub struct Emulator<M, K, S = ()> {
     pub kernel: K,
     /// The state that the kernel works on.
     pub ctx: S,
+    /// The tracer of the instructions.
+    pub tracer: T,
 }
 
 impl<M: Memory, K, S> Emulator<M, K, S> {
-    /// Creates an emulator whose hart starts at address zero.
+    /// Creates an emulator whose hart starts at address zero and does not trace.
     pub fn new(memory: M, kernel: K, ctx: S) -> Self {
-        Self { cpu: Cpu::new(0), memory, kernel, ctx }
+        Self { cpu: Cpu::new(0), memory, kernel, ctx, tracer: () }
+    }
+}
+
+impl<M: Memory, K, S, T: Tracer<M, S>> Emulator<M, K, S, T> {
+    /// Sets the tracer that sees every instruction, in place of the one that there is.
+    #[must_use]
+    pub fn with_tracer<T2: Tracer<M, S>>(self, tracer: T2) -> Emulator<M, K, S, T2> {
+        let Self { cpu, memory, kernel, ctx, .. } = self;
+        Emulator { cpu, memory, kernel, ctx, tracer }
     }
 
     /// Sets the program counter, which is where the program starts.
@@ -149,7 +163,7 @@ impl<M: Memory, K, S> Emulator<M, K, S> {
     /// Executes instructions up to the next system call and returns its number.
     fn run_to_syscall<E>(&mut self) -> Result<XWord, EmulationError<E, M::Error>> {
         loop {
-            match self.cpu.run(&mut self.memory, u64::MAX) {
+            match self.cpu.run_traced(&mut self.memory, u64::MAX, &mut self.tracer, &mut self.ctx) {
                 Stop::Ecall => return Ok(self.cpu.registers.get(REG_A7)),
                 Stop::Ebreak => return Err(EmulationError::Ebreak),
                 Stop::Budget => {}

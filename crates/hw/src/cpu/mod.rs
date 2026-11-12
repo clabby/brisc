@@ -32,6 +32,9 @@ pub use registers::Registers;
 mod stop;
 pub use stop::{Fault, Stop};
 
+mod trace;
+pub use trace::{Step, Tracer};
+
 /// A RISC-V hart.
 ///
 /// The hart executes the unprivileged instructions of the enabled instruction sets. Of the
@@ -84,6 +87,21 @@ impl Cpu {
     /// The instructions that the hart has decoded stay coherent with `memory` as long as the memory
     /// reports the writes to them, as [Memory] describes.
     pub fn run<M: Memory>(&mut self, memory: &mut M, budget: u64) -> Stop<M::Error> {
+        self.run_traced(memory, budget, &mut (), &mut ())
+    }
+
+    /// Does what [Cpu::run] does, and shows every instruction to `tracer` before executing it, with
+    /// `ctx`, which the hart does not look at.
+    ///
+    /// The instructions are interpreted one by one, even if the hart would compile them without a
+    /// tracer. A `tracer` that does not trace, like `()`, makes this the same as [Cpu::run].
+    pub fn run_traced<M: Memory, C, T: Tracer<M, C>>(
+        &mut self,
+        memory: &mut M,
+        budget: u64,
+        tracer: &mut T,
+        ctx: &mut C,
+    ) -> Stop<M::Error> {
         let mut remaining = budget;
 
         let stop = loop {
@@ -110,8 +128,8 @@ impl Cpu {
             #[cfg(not(feature = "jit"))]
             let jit = false;
             macro_rules! run {
-                ($precise:literal, $jit:literal) => {
-                    execute::<M, $precise, $jit>(
+                ($precise:literal, $jit:literal, $tracer:expr, $ctx:expr, $instret:expr) => {
+                    execute::<M, _, _, $precise, $jit>(
                         &mut self.registers,
                         #[cfg(feature = "a")]
                         &mut self.reservation,
@@ -124,14 +142,24 @@ impl Cpu {
                         base,
                         slot,
                         &mut remaining,
+                        $tracer,
+                        $ctx,
+                        $instret,
                     )
                 };
             }
-            let (exit, pc) = match (remaining >= SLOTS as u64, jit) {
-                (true, false) => run!(false, false),
-                (true, true) => run!(false, true),
-                (false, false) => run!(true, false),
-                (false, true) => run!(true, true),
+            let (exit, pc) = if T::ENABLED {
+                // A tracer sees every instruction, so the budget is checked before each of them
+                // and nothing is compiled.
+                let instret = self.instret + (budget - remaining);
+                run!(true, false, &mut *tracer, &mut *ctx, instret)
+            } else {
+                match (remaining >= SLOTS as u64, jit) {
+                    (true, false) => run!(false, false, &mut (), &mut (), 0),
+                    (true, true) => run!(false, true, &mut (), &mut (), 0),
+                    (false, false) => run!(true, false, &mut (), &mut (), 0),
+                    (false, true) => run!(true, true, &mut (), &mut (), 0),
+                }
             };
             self.pc = pc;
 

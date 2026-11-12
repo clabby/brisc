@@ -3,11 +3,11 @@
 use super::{Fault, Registers};
 use brisc_isa::{Instruction, Opcode, Word};
 
-/// An instruction in the form the interpreter executes: an [Instruction] packed into eight
+/// An instruction in the form the interpreter executes: an [`Instruction`] packed into eight
 /// bytes.
 ///
-/// The length of the instruction is part of [Op::code], so that every arm of the interpreter's
-/// dispatch knows statically how far to advance and the address of the next [Op] never depends
+/// The length of the instruction is part of [`Op::code`], so that every arm of the interpreter's
+/// dispatch knows statically how far to advance and the address of the next [`Op`] never depends
 /// on the contents of the current one.
 ///
 /// The fields share one 64-bit word, which the interpreter loads once and takes apart with
@@ -20,7 +20,7 @@ pub(super) struct Op(u64);
 // Eight bytes with eight-byte alignment: a slot never straddles two cache lines.
 const _: () = assert!(size_of::<Op>() == 8 && align_of::<Op>() == 8);
 
-/// The values of [Op::code] that do not stand for an instruction.
+/// The values of [`Op::code`] that do not stand for an instruction.
 pub(super) mod code {
     /// The initial content of a slot: leaves the interpreter to have the slot decoded. It is
     /// zero so that fresh slots are zeroed memory.
@@ -67,12 +67,12 @@ impl Op {
     }
 
     /// A slot whose `word` is not an instruction the hart can execute. The word is kept in the
-    /// immediate, for [decode] to say what is wrong with it.
+    /// immediate, for [`decode`] to say what is wrong with it.
     pub(super) const fn illegal(word: Word) -> Self {
         Self::pack(code::ILLEGAL, 0, 0, 0, word as i32)
     }
 
-    /// Returns the [Op::code] of an instruction with this opcode that is `length` bytes long.
+    /// Returns the [`Op::code`] of an instruction with this opcode that is `length` bytes long.
     pub(super) const fn code_for(opcode: Opcode, length: u8) -> u8 {
         let wide = if length == 4 { code::WIDE } else { 0 };
         (code::FIRST_OPCODE + opcode as u8) | wide
@@ -89,8 +89,8 @@ impl Op {
         )
     }
 
-    /// Returns what the interpreter does: one of the constants in [code], or the code of an
-    /// [Opcode] and a length.
+    /// Returns what the interpreter does: one of the constants in [`code`], or the code of an
+    /// [`Opcode`] and a length.
     #[inline(always)]
     pub(super) const fn code(self) -> u8 {
         self.0 as u8
@@ -114,7 +114,7 @@ impl Op {
         (self.0 >> 24) as usize & (Registers::LEN - 1)
     }
 
-    /// Returns the immediate, as in [Instruction::imm].
+    /// Returns the immediate, as in [`Instruction::imm`].
     #[inline(always)]
     pub(super) const fn imm(self) -> i32 {
         (self.0 >> 32) as i32
@@ -124,18 +124,16 @@ impl Op {
     ///
     /// ## Panics
     ///
-    /// Panics if the [Op] does not stand for an instruction.
-    #[cfg(any(feature = "a", feature = "jit"))]
+    /// Panics if the [`Op`] does not stand for an instruction.
     pub(super) const fn opcode(self) -> Opcode {
         Opcode::ALL[((self.code() & !code::WIDE) - code::FIRST_OPCODE) as usize]
     }
 
-    /// Returns the instruction that the [Op] packs.
+    /// Returns the instruction that the [`Op`] packs.
     ///
     /// ## Panics
     ///
-    /// Panics if the [Op] does not stand for an instruction.
-    #[cfg(feature = "jit")]
+    /// Panics if the [`Op`] does not stand for an instruction.
     pub(super) const fn instruction(self) -> Instruction {
         let sink = Registers::SINK as usize;
         Instruction {

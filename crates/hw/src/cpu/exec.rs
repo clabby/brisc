@@ -3,7 +3,7 @@
 use super::{
     code::{slot_of, CodePage, SLOTS},
     op::{code, Op},
-    Registers,
+    Registers, Step, Tracer,
 };
 use crate::memory::{page_index, Memory};
 use brisc_isa::{SXWord, Word, XWord};
@@ -150,7 +150,7 @@ fn op_at(code: &CodePage, slot: usize) -> Op {
     clippy::too_many_arguments,
     reason = "the interpreter keeps its state in locals, and bundling it would not make it faster"
 )]
-pub(super) fn execute<M: Memory, const PRECISE: bool, const JIT: bool>(
+pub(super) fn execute<M: Memory, T: Tracer<M, C>, C, const PRECISE: bool, const JIT: bool>(
     registers: &mut Registers,
     #[cfg(feature = "a")] reservation: &mut Option<Address>,
     memory: &mut M,
@@ -160,8 +160,10 @@ pub(super) fn execute<M: Memory, const PRECISE: bool, const JIT: bool>(
     base: XWord,
     mut slot: usize,
     remaining: &mut u64,
+    tracer: &mut T,
+    ctx: &mut C,
+    instret: u64,
 ) -> (Exit<M::Error>, XWord) {
-    let r = &mut registers.0;
     let budget = (*remaining).min(i64::MAX as u64) as i64;
     let mut n = budget;
 
@@ -185,7 +187,16 @@ pub(super) fn execute<M: Memory, const PRECISE: bool, const JIT: bool>(
             break (Exit::Leave, pc!());
         }
         let op = op_at(code, slot);
+        if T::ENABLED && op.code() >= code::FIRST_OPCODE {
+            let step = Step {
+                pc: pc!(),
+                instruction: op.instruction(),
+                instret: instret + (budget - n) as u64,
+            };
+            tracer.trace(ctx, &*memory, &*registers, &step);
+        }
         n -= 1;
+        let r = &mut registers.0;
 
         macro_rules! rs1 {
             () => {
