@@ -10,7 +10,7 @@
 Brisc is a collection of libraries for running single-threaded RISC-V programs targeting the unprivileged
 `riscv{32/64}i{mac}` ISAs.
 
-`brisc` is in active development and is not ready for production use.
+`brisc` is not actively maintained and is not intended for production use.
 
 ## Crates
 
