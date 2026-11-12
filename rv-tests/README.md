@@ -9,7 +9,7 @@ This directory contains test vectors for the `brisc` emulator, namely:
 The programs in `rs-programs` run as guests in the emulator tests and in the benchmarks. Their
 binaries, for 32 and 64 bits, are in `bin` as `rs-{32,64}bit-<name>`.
 
-- `fib`, `quicksort-heap` and `eth-transfer` use the `syscalls` and allocator crates.
+- `fib` and `quicksort-heap` use the `syscalls` and allocator crates.
 - `sha256`, `matmul`, `sieve`, `crc-rle`, `bfvm`, `hashmap`, `mandelbrot` and `tree` have
   no dependencies and stand for different kinds of general-purpose code: hashing, dense arithmetic,
   byte loops, table lookups, interpreter dispatch, random memory access, multiplication and

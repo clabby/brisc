@@ -28,7 +28,7 @@ and the layout of the code move small differences by a few percent.
   and by up to 22%; with two copies the interpreter is as fast as without the feature.
 - **A region cap of 1500 instructions.** At 400 the loop of `sha256` was cut in two and left the
   region on each iteration, running at 0.4 times the speed of the interpreter.
-- **A threshold of 2000 iterations.** At 1000, `eth-transfer`, which runs for 0.3 ms, still
+- **A threshold of 2000 iterations.** At 1000, a guest that runs for 0.3 ms still
   started the compiler thread and ran 7% slower.
 - **Compiling quickly first and with optimizations once a region has run for long.** Compiling a
   large region takes 5 ms without optimizations and 14 to 18 ms with them, and the quick code runs
