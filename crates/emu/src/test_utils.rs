@@ -2,10 +2,10 @@
 
 use crate::{
     kernel::{AsyncKernel, Kernel, MinimalKernel, Syscall, SyscallError, UnknownSyscall},
-    Emulator,
+    EmulationError, Emulator,
 };
 use brisc_hw::{
-    cpu::{Registers, Step, Stop, Tracer},
+    cpu::{Registers, Step, Stop, Tracer, Weights},
     memory::{Memory, SparseMemory},
     XWord, REG_A7,
 };
@@ -127,6 +127,8 @@ pub fn run_riscv_test(test_path: &PathBuf) -> u64 {
     // Every instruction is traced once, including each ecall.
     assert_eq!(emu.tracer.traced, instructions);
 
+    check_budget(&elf, instructions);
+
     // The budgets surround the number of instructions the interpreter can run between checks of
     // its budget, which is what separates its exact and its fast mode.
     for budget in [1, 3, 2047, 2049] {
@@ -134,6 +136,47 @@ pub fn run_riscv_test(test_path: &PathBuf) -> u64 {
     }
 
     instructions
+}
+
+/// Gives every kind of instruction a different weight.
+fn weights() -> Weights {
+    Weights::new(|opcode| 1 + opcode as u32 % 5)
+}
+
+/// Runs the program with weighted instructions, on the interpreter and on compiled code, and
+/// checks that both spend the same and that the budget is exact: the run completes with exactly
+/// what it spends, and with one unit less it stops, and completes once the unit is added.
+///
+/// ## Panics
+///
+/// Panics if a run does not behave like that.
+fn check_budget(elf: &[u8], instructions: u64) {
+    let interpreted = load(MinimalKernel, elf).with_weights(weights());
+    #[cfg(feature = "jit")]
+    let interpreted = interpreted.with_jit(None);
+    let mut interpreted = interpreted;
+    assert_eq!(interpreted.run(), Ok(0));
+    let spent = interpreted.cpu.spent;
+    assert_eq!(interpreted.cpu.instret, instructions);
+    assert!(spent >= instructions);
+
+    let mut compiled = deterministic(load(MinimalKernel, elf).with_weights(weights()));
+    assert_eq!(compiled.run(), Ok(0));
+    assert_eq!((compiled.cpu.instret, compiled.cpu.spent), (instructions, spent));
+
+    let mut exact =
+        deterministic(load(MinimalKernel, elf).with_weights(weights()).with_budget(spent));
+    assert_eq!(exact.run(), Ok(0));
+    assert_eq!(exact.budget, 0);
+
+    let mut short =
+        deterministic(load(MinimalKernel, elf).with_weights(weights()).with_budget(spent - 1));
+    assert_eq!(short.run(), Err(EmulationError::Budget));
+    // The run stopped because the next instruction, which weighs at most five, did not fit.
+    assert!(short.cpu.spent < spent && short.budget < 5);
+    short.budget += spent - short.cpu.spent;
+    assert_eq!(short.run(), Ok(0));
+    assert_eq!((short.cpu.instret, short.cpu.spent), (instructions, spent));
 }
 
 /// Runs the program with the processor limited to `budget` instructions at a time and returns the

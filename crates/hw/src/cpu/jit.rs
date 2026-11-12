@@ -195,6 +195,16 @@ impl JitState {
         self.stats
     }
 
+    /// Forgets every region. Regions that are being compiled are ignored when they finish.
+    pub(super) fn reset(&mut self) {
+        for table in &mut self.table {
+            table.fill(UNKNOWN);
+        }
+        for generation in &mut self.generations {
+            *generation += 1;
+        }
+    }
+
     /// Forgets the regions of the page at position in the code cache.
     pub(super) fn invalidate(&mut self, position: usize) {
         if let Some(table) = self.table.get_mut(position) {
@@ -348,6 +358,7 @@ impl Cpu {
                         header: slot,
                         max_instructions: config.max_region_instructions,
                         instruction: &|slot| instruction(code, slot),
+                        weights: self.weights.as_ref().map(|weights| &weights.by_opcode()[..]),
                     },
                 );
                 match (improves, region) {
@@ -367,6 +378,7 @@ impl Cpu {
                     header: slot,
                     max_instructions: config.max_region_instructions,
                     instructions: (0..SLOTS).map(|slot| instruction(code, slot)).collect(),
+                    weights: self.weights.as_ref().map(|weights| weights.by_opcode().clone()),
                 });
                 self.jit.pending.insert(
                     id,
@@ -394,6 +406,7 @@ impl Cpu {
         position: usize,
         slot: usize,
         remaining: &mut u64,
+        retired: &mut u64,
     ) {
         let threshold = self.jit.threshold();
         // Regions access memory through the software TLB that the memory describes.
@@ -422,21 +435,23 @@ impl Cpu {
         for entry in region.entries.iter() {
             counters[*entry] = threshold - 1;
         }
-        if *remaining < region.max_retire {
+        if *remaining < region.max_cost {
             return;
         }
         let entry_index = region.entries.binary_search(&slot).expect("the table maps entries");
 
         let budget = match compiled.quality {
-            Quality::Quick => (*remaining).min(QUICK_QUANTUM).max(region.max_retire),
+            Quality::Quick => (*remaining).min(QUICK_QUANTUM).max(region.max_cost),
             Quality::Fast => *remaining,
         };
-        let mut ctx = Ctx { budget: budget.min(i64::MAX as u64) as i64, retired: 0, pc: 0, probe };
+        let mut ctx =
+            Ctx { budget: budget.min(i64::MAX as u64) as i64, retired: 0, spent: 0, pc: 0, probe };
         // SAFETY: The region was compiled for this register file and for a software TLB that
-        // follows the contract of [brisc_jit::Probe], and the budget is at least the number of
-        // instructions that the region may retire.
+        // follows the contract of [brisc_jit::Probe], and the budget is at least what the region
+        // may spend before it checks it.
         unsafe { (region.entry)(self.registers.0.as_mut_ptr(), &mut ctx, entry_index as u64) };
-        *remaining -= ctx.retired;
+        *remaining -= ctx.spent;
+        *retired += ctx.retired;
         self.pc = ctx.pc;
 
         self.jit.stats.entries += 1;

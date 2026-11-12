@@ -35,11 +35,12 @@
 //! [`Ctx`] the number of instructions that it retired and the program counter at which the
 //! interpreter continues. The instruction at that program counter has not been executed.
 //!
-//! To retire exactly the instructions that the interpreter would, a region must only be entered
-//! with a budget of at least [`Region::max_retire`] instructions. A region can only run more than
-//! that many instructions by flowing back to an earlier instruction, so it checks the budget at
-//! each such jump and leaves for the interpreter if fewer than [`Region::max_retire`] instructions
-//! remain.
+//! The budget that a region runs under counts instructions, or, if the [`Request`] gives a weight
+//! to each opcode, the sum of their weights. To retire exactly the instructions that the
+//! interpreter would, a region must only be entered with a budget of at least [`Region::max_cost`].
+//! A region can only run more than that by flowing back to an earlier instruction, so it checks the
+//! budget at each such jump and leaves for the interpreter if less than [`Region::max_cost`]
+//! remains.
 //!
 //! # Memory
 //!
@@ -158,10 +159,14 @@ unsafe impl Sync for Probe {}
 #[repr(C)]
 #[derive(Debug)]
 pub struct Ctx {
-    /// The number of instructions that the region may retire, when it is entered.
+    /// What the region may spend, when it is entered: instructions, or the weights of
+    /// [`Request::weights`] if the region was compiled with weights.
     pub budget: i64,
     /// The number of instructions that the region retired, when it exits.
     pub retired: u64,
+    /// What the region spent, when it exits, in the units of [`Ctx::budget`]. This is
+    /// [`Ctx::retired`] if the region was compiled without weights.
+    pub spent: u64,
     /// The program counter at which the interpreter continues, when the region exits.
     pub pc: u64,
     /// The software TLB that the region probes.
@@ -184,6 +189,9 @@ pub struct Request<'a> {
     /// Returns the instruction in a slot of the page, if it has been decoded and does not extend
     /// beyond the page.
     pub instruction: &'a dyn Fn(usize) -> Option<Instruction>,
+    /// What each opcode costs against the budget, at index [`Opcode`] as a number, or None to
+    /// count every instruction as one. A weight is at least one.
+    pub weights: Option<&'a [u32]>,
 }
 
 /// A compiled region.
@@ -198,8 +206,9 @@ pub struct Region {
     /// The slots at which the region can be entered, in ascending order: its first instruction
     /// and the instructions that jumps back go to.
     pub entries: Box<[usize]>,
-    /// The number of instructions that must remain in the budget to enter the region.
-    pub max_retire: u64,
+    /// What must remain in the budget to enter the region: the most that the region can spend
+    /// before it checks the budget.
+    pub max_cost: u64,
     /// The number of instructions in the region.
     pub instructions: usize,
 }
@@ -268,11 +277,12 @@ impl Jit {
         let code = self.module.get_finalized_function(id);
         self.module.clear_context(&mut ctx);
 
+        let max_cost = shape.cost(request.weights);
         Some(Region {
             // SAFETY: The code was generated for the signature of [Entry].
             entry: unsafe { core::mem::transmute::<*const u8, Entry>(code) },
             entries: shape.entries.into_boxed_slice(),
-            max_retire: shape.instructions.len() as u64,
+            max_cost,
             instructions: shape.instructions.len(),
         })
     }
@@ -301,6 +311,8 @@ pub struct Job {
     pub max_instructions: usize,
     /// The instruction in each slot of the page, as for [`Request::instruction`].
     pub instructions: Vec<Option<Instruction>>,
+    /// See [`Request::weights`].
+    pub weights: Option<std::sync::Arc<[u32]>>,
 }
 
 /// The result of a [`Job`].
@@ -349,6 +361,7 @@ impl Background {
                             header: job.header,
                             max_instructions: job.max_instructions,
                             instruction: &|slot| job.instructions[slot],
+                            weights: job.weights.as_deref(),
                         })
                     }))
                 });
@@ -475,6 +488,13 @@ struct Shape {
 const MAX_RETURN_SITES: usize = 8;
 
 impl Shape {
+    /// Returns the most that the instructions of the region can spend in one pass.
+    fn cost(&self, weights: Option<&[u32]>) -> u64 {
+        weights.map_or(self.instructions.len() as u64, |weights| {
+            self.instructions.values().map(|i| weights[i.opcode as usize] as u64).sum()
+        })
+    }
+
     /// Follows control flow from the header of `request`.
     fn discover(request: &Request<'_>) -> Option<Self> {
         if request.max_instructions == 0 {
@@ -648,9 +668,12 @@ struct Lowering<'a, 'b> {
     vars: [Variable; 32],
     /// The number of instructions retired so far.
     retired: Variable,
+    /// What has been spent so far, if the request has weights. Without them it is
+    /// [`Self::retired`].
+    spent: Variable,
     regs: Value,
     ctx: Value,
-    /// The value of [`Ctx::budget`] minus the number of instructions of the region.
+    /// The value of [`Ctx::budget`] minus the most that a pass through the region spends.
     limit: Value,
     /// The software TLB, if the region probes it.
     tlb: Option<Value>,
@@ -680,6 +703,7 @@ impl<'a, 'b> Lowering<'a, 'b> {
     fn new(mut builder: FunctionBuilder<'b>, request: &'a Request<'a>, shape: &'a Shape) -> Self {
         let vars = core::array::from_fn(|_| builder.declare_var(types::I64));
         let retired = builder.declare_var(types::I64);
+        let spent = builder.declare_var(types::I64);
         let epilogue = builder.create_block();
         let mut written: Vec<u8> = shape
             .instructions
@@ -697,6 +721,7 @@ impl<'a, 'b> Lowering<'a, 'b> {
             shape,
             vars,
             retired,
+            spent,
             regs: Value::from_u32(0),
             ctx: Value::from_u32(0),
             limit: Value::from_u32(0),
@@ -731,11 +756,22 @@ impl<'a, 'b> Lowering<'a, 'b> {
         }
     }
 
-    /// Retires one instruction.
-    fn retire(&mut self) {
+    /// Retires an instruction with the given opcode.
+    fn retire(&mut self, opcode: Opcode) {
         let retired = self.builder.use_var(self.retired);
         let retired = self.builder.ins().iadd_imm_s(retired, 1);
         self.builder.def_var(self.retired, retired);
+        if let Some(weights) = self.request.weights {
+            let spent = self.builder.use_var(self.spent);
+            let spent = self.builder.ins().iadd_imm_s(spent, weights[opcode as usize] as i64);
+            self.builder.def_var(self.spent, spent);
+        }
+    }
+
+    /// Returns what has been spent so far.
+    fn spent(&mut self) -> Value {
+        let variable = if self.request.weights.is_some() { self.spent } else { self.retired };
+        self.builder.use_var(variable)
     }
 
     /// Leaves the region at the program counter in pc.
@@ -765,7 +801,8 @@ impl<'a, 'b> Lowering<'a, 'b> {
 
         let budget =
             self.builder.ins().load(types::I64, FLAGS, self.ctx, offset_of!(Ctx, budget) as i32);
-        self.limit = self.builder.ins().iadd_imm_s(budget, -(self.shape.instructions.len() as i64));
+        let max_cost = self.shape.cost(self.request.weights);
+        self.limit = self.builder.ins().iadd_imm_s(budget, -(max_cost as i64));
         let probe =
             self.builder.ins().load(types::I64, FLAGS, self.ctx, offset_of!(Ctx, probe) as i32);
         let tlb = self.builder.ins().load(types::I64, FLAGS, probe, offset_of!(Probe, tlb) as i32);
@@ -773,6 +810,7 @@ impl<'a, 'b> Lowering<'a, 'b> {
         self.tlb = Some(tlb);
         let zero = self.iconst(0);
         self.builder.def_var(self.retired, zero);
+        self.builder.def_var(self.spent, zero);
 
         // Registers that the region reads or writes.
         let mut used = BTreeSet::new();
@@ -829,6 +867,8 @@ impl<'a, 'b> Lowering<'a, 'b> {
         }
         let retired = self.builder.use_var(self.retired);
         self.builder.ins().store(FLAGS, retired, self.ctx, offset_of!(Ctx, retired) as i32);
+        let spent = self.spent();
+        self.builder.ins().store(FLAGS, spent, self.ctx, offset_of!(Ctx, spent) as i32);
         self.builder.ins().store(FLAGS, pc, self.ctx, offset_of!(Ctx, pc) as i32);
         self.builder.ins().return_(&[]);
         self.builder.seal_all_blocks();
@@ -860,8 +900,8 @@ impl<'a, 'b> Lowering<'a, 'b> {
                 // A jump back: stop if the budget could run out before the next check.
                 let stop = self.builder.create_block();
                 self.builder.set_cold_block(stop);
-                let retired = self.builder.use_var(self.retired);
-                let over = self.builder.ins().icmp(IntCC::SignedGreaterThan, retired, self.limit);
+                let spent = self.spent();
+                let over = self.builder.ins().icmp(IntCC::SignedGreaterThan, spent, self.limit);
                 self.builder.ins().brif(over, stop, &[], go, &[]);
                 self.builder.switch_to_block(stop);
             }
@@ -894,7 +934,7 @@ impl<'a, 'b> Lowering<'a, 'b> {
             Jal => {
                 let link = self.iconst(next_pc as i64);
                 self.set(i.rd, link);
-                self.retire();
+                self.retire(i.opcode);
                 let (target, target_pc) = self.target(slot, &i);
                 let edge = self.edge(slot, target, target_pc);
                 self.builder.ins().jump(edge, &[]);
@@ -905,7 +945,7 @@ impl<'a, 'b> Lowering<'a, 'b> {
                 let target_pc = self.pc(target);
                 let link = self.iconst(next_pc as i64);
                 self.set(i.rd, link);
-                self.retire();
+                self.retire(i.opcode);
                 let edge = self.edge(slot, Some(target), target_pc);
                 self.builder.ins().jump(edge, &[]);
                 return true;
@@ -916,7 +956,7 @@ impl<'a, 'b> Lowering<'a, 'b> {
                 let target = self.builder.ins().band_imm_s(target, !1);
                 let link = self.iconst(next_pc as i64);
                 self.set(i.rd, link);
-                self.retire();
+                self.retire(i.opcode);
                 // A return to a call site in the region stays in the region.
                 let sites = self.shape.return_sites.clone();
                 let sites: Vec<usize> = sites
@@ -948,7 +988,7 @@ impl<'a, 'b> Lowering<'a, 'b> {
                     _ => IntCC::UnsignedGreaterThanOrEqual,
                 };
                 let condition = self.builder.ins().icmp(cc, a, b);
-                self.retire();
+                self.retire(i.opcode);
                 let (target, target_pc) = self.target(slot, &i);
                 let taken = self.edge(slot, target, target_pc);
                 let fallthrough_slot = slot + i.length as usize / 2;
@@ -992,7 +1032,7 @@ impl<'a, 'b> Lowering<'a, 'b> {
                 }
             }
         }
-        self.retire();
+        self.retire(i.opcode);
         false
     }
 
@@ -1250,6 +1290,14 @@ mod test {
     /// different lengths and control flow goes to the middle of one. The compiler is returned too,
     /// because the code is only valid while it lives.
     fn compile_slots(program: &[(usize, Instruction)]) -> (Jit, Region) {
+        compile_slots_weighted(program, None)
+    }
+
+    /// Like [`compile_slots`], with the weights of the opcodes.
+    fn compile_slots_weighted(
+        program: &[(usize, Instruction)],
+        weights: Option<&[u32]>,
+    ) -> (Jit, Region) {
         let mut slots = vec![None; SLOTS];
         for (slot, instruction) in program {
             slots[*slot] = Some(*instruction);
@@ -1261,6 +1309,7 @@ mod test {
                 header: program[0].0,
                 max_instructions: 100,
                 instruction: &|slot| slots[slot],
+                weights,
             })
             .expect("the program compiles");
         (jit, region)
@@ -1268,12 +1317,17 @@ mod test {
 
     /// Compiles the program, whose instructions are 4 bytes long and which starts at BASE.
     fn compile(program: &[u32]) -> (Jit, Region) {
+        compile_weighted(program, None)
+    }
+
+    /// Like [`compile`], with the weights of the opcodes.
+    fn compile_weighted(program: &[u32], weights: Option<&[u32]>) -> (Jit, Region) {
         let slots: Vec<_> = program
             .iter()
             .enumerate()
             .map(|(i, word)| (2 * i, Instruction::decode(*word).unwrap()))
             .collect();
-        compile_slots(&slots)
+        compile_slots_weighted(&slots, weights)
     }
 
     /// Compiles the loop that adds one to a0 until it equals a1, which is followed by an ecall.
@@ -1286,7 +1340,7 @@ mod test {
         registers[11] = a1;
         registers[5] = 0x5000;
         let probe = unused_probe();
-        let mut ctx = Ctx { budget, retired: 0, pc: 0, probe: &probe };
+        let mut ctx = Ctx { budget, retired: 0, spent: 0, pc: 0, probe: &probe };
         // SAFETY: The region uses the registers and the context, and not the software TLB,
         // which it has no memory instruction to need.
         unsafe { (region.entry)(registers.as_mut_ptr(), &mut ctx, 0) };
@@ -1307,11 +1361,53 @@ mod test {
     fn a_loop_leaves_before_the_budget_could_run_out() {
         let (_jit, region) = counting_loop();
         // Entering needs a budget of one pass; the region then checks at each jump back.
-        let budget = region.max_retire as i64 + 3;
+        let budget = region.max_cost as i64 + 3;
         let (registers, ctx) = run(&region, 1000, budget);
         assert!(ctx.retired as i64 <= budget);
         assert_eq!(registers[10], ctx.retired / 2);
         assert_eq!(ctx.pc, BASE);
+    }
+
+    /// The weights that the tests use: addi weighs 3, bne 5 and everything else 1.
+    fn test_weights() -> Vec<u32> {
+        Opcode::ALL
+            .iter()
+            .map(|opcode| match opcode {
+                Opcode::Addi => 3,
+                Opcode::Bne => 5,
+                _ => 1,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_weighted_loop_spends_the_weights_of_the_instructions_it_retires() {
+        let weights = test_weights();
+        let (_jit, region) = compile_weighted(
+            &[rv!(addi a0, a0, 1), rv!(bne a0, a1, -4), rv!(ecall)],
+            Some(&weights),
+        );
+        assert_eq!(region.max_cost, 8);
+        let (registers, ctx) = run(&region, 10, 1000);
+        assert_eq!(registers[10], 10);
+        assert_eq!((ctx.retired, ctx.spent), (20, 80));
+    }
+
+    #[test]
+    fn a_weighted_loop_leaves_before_the_budget_could_run_out() {
+        let weights = test_weights();
+        let (_jit, region) = compile_weighted(
+            &[rv!(addi a0, a0, 1), rv!(bne a0, a1, -4), rv!(ecall)],
+            Some(&weights),
+        );
+        for budget in region.max_cost as i64..60 {
+            let (registers, ctx) = run(&region, 1000, budget);
+            assert!(ctx.spent as i64 <= budget, "budget {budget}");
+            assert_eq!(ctx.spent, 8 * ctx.retired / 2, "budget {budget}");
+            assert_eq!(registers[10], ctx.retired / 2);
+            // Another pass would not have been covered by what remains.
+            assert!(budget - (ctx.spent as i64) < 2 * region.max_cost as i64, "budget {budget}");
+        }
     }
 
     #[test]

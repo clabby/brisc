@@ -29,6 +29,12 @@ following features:
 The `jit` feature adds a compiler for hot loops, which is off by default because it needs the
 standard library and a 64-bit hart. Use `Emulator::with_jit` to configure it. See `brisc-hw` for what it does.
 
+## Budgets
+
+`Emulator::with_weights` and `Emulator::with_budget` limit what a guest may spend, in units that the weights
+define. When the budget does not cover the next instruction, `run` returns `EmulationError::Budget` and
+running again with a larger `budget` continues.
+
 ## Tracing
 
 `Emulator::with_tracer` sets a `Tracer` that sees every instruction before it executes. See `brisc-hw`.

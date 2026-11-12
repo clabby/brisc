@@ -23,6 +23,8 @@ pub(super) enum Exit<E> {
     /// Execution continues at the returned program counter, on another page or after the caller
     /// has looked at the remaining budget and at writes to watched pages.
     Leave,
+    /// The instruction at the returned program counter costs more than the budget that remains.
+    Budget,
     /// The slot at the returned program counter has not been decoded.
     Decode,
     /// The instruction at the returned program counter is an `ecall`. It has been retired.
@@ -134,14 +136,17 @@ fn op_at(code: &CodePage, slot: usize) -> Op {
 /// Executes the instructions of one page of decoded `code`, starting at `slot`, until execution
 /// leaves the page or has to stop. `base` is the address of the page.
 ///
-/// Returns why execution stopped and the program counter at that point, and subtracts the number
-/// of instructions retired from `remaining`.
+/// Returns why execution stopped and the program counter at that point, and subtracts what the
+/// instructions retired cost from `remaining`. An instruction costs one unit, or, with `WEIGHTED`
+/// set, its entry in `weights`, and `retired` is then increased by the number of instructions
+/// retired, which the budget no longer tells.
 ///
-/// With `PRECISE` set, the budget is checked before every instruction and exactly `remaining`
-/// instructions are retired at most. Without it, the budget is only checked after control
-/// transfers, which is sound when `remaining` is at least [`SLOTS`]: the loop returns once fewer
-/// than [`SLOTS`] instructions remain, and no more than [`SLOTS`] instructions can execute between
-/// two checks because every instruction advances by at least one slot.
+/// With `PRECISE` set, the budget is checked before every instruction and the loop returns
+/// with [`Exit::Budget`] when the next instruction costs more than `remaining`. Without it, the
+/// budget is only checked after control transfers, which is sound when `remaining` is at least
+/// `page_budget`, the cost of the most expensive run through a page: [`SLOTS`] units without
+/// weights. The loop returns once less than that remains, and no more than [`SLOTS`] instructions
+/// can execute between two checks because every instruction advances by at least one slot.
 #[allow(
     clippy::unnecessary_cast,
     reason = "XWord is 32 or 64 bits wide depending on the enabled features"
@@ -150,7 +155,15 @@ fn op_at(code: &CodePage, slot: usize) -> Op {
     clippy::too_many_arguments,
     reason = "the interpreter keeps its state in locals, and bundling it would not make it faster"
 )]
-pub(super) fn execute<M: Memory, T: Tracer<M, C>, C, const PRECISE: bool, const JIT: bool>(
+#[inline(always)]
+pub(super) fn execute<
+    M: Memory,
+    T: Tracer<M, C>,
+    C,
+    const PRECISE: bool,
+    const JIT: bool,
+    const WEIGHTED: bool,
+>(
     registers: &mut Registers,
     #[cfg(feature = "a")] reservation: &mut Option<Address>,
     memory: &mut M,
@@ -163,9 +176,15 @@ pub(super) fn execute<M: Memory, T: Tracer<M, C>, C, const PRECISE: bool, const 
     tracer: &mut T,
     ctx: &mut C,
     instret: u64,
+    weights: &[u32; 256],
+    page_budget: u64,
+    retired: &mut u64,
 ) -> (Exit<M::Error>, XWord) {
     let budget = (*remaining).min(i64::MAX as u64) as i64;
     let mut n = budget;
+    let page_budget = if WEIGHTED { page_budget.min(i64::MAX as u64) as i64 } else { SLOTS as i64 };
+    // The instructions retired, which only has to be counted when they cost different amounts.
+    let mut done = 0u64;
 
     macro_rules! pc {
         () => {
@@ -176,26 +195,40 @@ pub(super) fn execute<M: Memory, T: Tracer<M, C>, C, const PRECISE: bool, const 
     // straight run through the page.
     macro_rules! check_budget {
         () => {
-            if !PRECISE && n < SLOTS as i64 {
+            if !PRECISE && n < page_budget {
                 break (Exit::Leave, pc!());
             }
         };
     }
 
     let exit = loop {
-        if PRECISE && n == 0 {
-            break (Exit::Leave, pc!());
-        }
         let op = op_at(code, slot);
+        // What the instruction costs. A slot that is not an instruction costs nothing.
+        let cost = if WEIGHTED { weights[op.code() as usize] as i64 } else { 1 };
+        if PRECISE && n < cost {
+            break (Exit::Budget, pc!());
+        }
         if T::ENABLED && op.code() >= code::FIRST_OPCODE {
             let step = Step {
                 pc: pc!(),
                 instruction: op.instruction(),
-                instret: instret + (budget - n) as u64,
+                instret: instret + if WEIGHTED { done } else { (budget - n) as u64 },
             };
             tracer.trace(ctx, &*memory, &*registers, &step);
         }
-        n -= 1;
+        n -= cost;
+        if WEIGHTED {
+            done += 1;
+        }
+        // Gives back the cost of an instruction that does not retire.
+        macro_rules! refund {
+            () => {
+                n += cost;
+                if WEIGHTED {
+                    done -= 1;
+                }
+            };
+        }
         let r = &mut registers.0;
 
         macro_rules! rs1 {
@@ -240,7 +273,7 @@ pub(super) fn execute<M: Memory, T: Tracer<M, C>, C, const PRECISE: bool, const 
                 match $access {
                     Ok(value) => value,
                     Err(error) => {
-                        n += 1;
+                        refund!();
                         break (Exit::Memory(error), pc!());
                     }
                 }
@@ -314,7 +347,7 @@ pub(super) fn execute<M: Memory, T: Tracer<M, C>, C, const PRECISE: bool, const 
                         }
                     }
                     Err(exit) => {
-                        n += 1;
+                        refund!();
                         break (exit, pc!());
                     }
                 }
@@ -322,9 +355,9 @@ pub(super) fn execute<M: Memory, T: Tracer<M, C>, C, const PRECISE: bool, const 
         }
 
         dispatch!(op.code(), advance, {
-            code::DECODE => { n += 1; break (Exit::Decode, pc!()); }
-            code::PAGE_END => { n += 1; break (Exit::Leave, pc!()); }
-            code::ILLEGAL => { n += 1; break (Exit::Illegal(op.imm() as Word), pc!()); }
+            code::DECODE => { refund!(); break (Exit::Decode, pc!()); }
+            code::PAGE_END => { refund!(); break (Exit::Leave, pc!()); }
+            code::ILLEGAL => { refund!(); break (Exit::Illegal(op.imm() as Word), pc!()); }
         }, {
             Ecall => { break (Exit::Ecall, pc!()); }
 
@@ -458,7 +491,7 @@ pub(super) fn execute<M: Memory, T: Tracer<M, C>, C, const PRECISE: bool, const 
 
             Ebreak => {
                 core::hint::cold_path();
-                n += 1;
+                refund!();
                 break (Exit::Ebreak, pc!());
             }
             // Privilege levels and interrupts are not modelled, and with a single hart and
@@ -479,7 +512,62 @@ pub(super) fn execute<M: Memory, T: Tracer<M, C>, C, const PRECISE: bool, const 
     };
 
     *remaining -= (budget - n) as u64;
+    if WEIGHTED {
+        *retired += done;
+    }
     exit
+}
+
+/// [`execute`] with weights, kept out of line so that the interpreter that does not weigh, which
+/// most harts are, is compiled as if the weights did not exist.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the interpreter keeps its state in locals, and bundling it would not make it faster"
+)]
+#[inline(never)]
+pub(super) fn execute_weighted<
+    M: Memory,
+    T: Tracer<M, C>,
+    C,
+    const PRECISE: bool,
+    const JIT: bool,
+>(
+    registers: &mut Registers,
+    #[cfg(feature = "a")] reservation: &mut Option<Address>,
+    memory: &mut M,
+    code: &CodePage,
+    #[cfg(feature = "jit")] counters: &mut [u16; SLOTS],
+    #[cfg(feature = "jit")] threshold: u16,
+    base: XWord,
+    slot: usize,
+    remaining: &mut u64,
+    tracer: &mut T,
+    ctx: &mut C,
+    instret: u64,
+    weights: &[u32; 256],
+    page_budget: u64,
+    retired: &mut u64,
+) -> (Exit<M::Error>, XWord) {
+    execute::<M, T, C, PRECISE, JIT, true>(
+        registers,
+        #[cfg(feature = "a")]
+        reservation,
+        memory,
+        code,
+        #[cfg(feature = "jit")]
+        counters,
+        #[cfg(feature = "jit")]
+        threshold,
+        base,
+        slot,
+        remaining,
+        tracer,
+        ctx,
+        instret,
+        weights,
+        page_budget,
+        retired,
+    )
 }
 
 /// Executes an instruction of the A extension. Returns whether it wrote to a watched page, or

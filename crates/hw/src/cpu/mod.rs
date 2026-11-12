@@ -21,7 +21,7 @@ pub use jit::{Compilation, JitConfig, JitStats};
 mod jit_test;
 
 mod exec;
-use exec::{execute, Exit};
+use exec::{execute, execute_weighted, Exit};
 
 mod op;
 use op::decode;
@@ -34,6 +34,10 @@ pub use stop::{Fault, Stop};
 
 mod trace;
 pub use trace::{Step, Tracer};
+
+mod weights;
+pub use weights::Weights;
+use weights::UNWEIGHED;
 
 /// A RISC-V hart.
 ///
@@ -57,10 +61,15 @@ pub struct Cpu {
     pub pc: XWord,
     /// The number of instructions retired.
     pub instret: u64,
+    /// What the instructions retired have cost, in the units of the budget of [`Cpu::run`]: the
+    /// sum of the weights that applied as each instruction retired. Without [`Weights`] it is
+    /// [`Cpu::instret`].
+    pub spent: u64,
     /// The address registered by the last load-reserved, if a store-conditional has not consumed
     /// it yet.
     #[cfg(feature = "a")]
     reservation: Option<Address>,
+    weights: Option<Weights>,
     code: CodeCache,
     #[cfg(feature = "jit")]
     jit: jit::JitState,
@@ -73,16 +82,37 @@ impl Cpu {
             registers: Registers::new(),
             pc,
             instret: 0,
+            spent: 0,
             #[cfg(feature = "a")]
             reservation: None,
+            weights: None,
             code: CodeCache::default(),
             #[cfg(feature = "jit")]
             jit: jit::JitState::new(),
         }
     }
 
-    /// Executes instructions from `memory` until `budget` of them have been retired, or until an
+    /// Sets what instructions cost against the budget of [`Cpu::run`], or makes every instruction
+    /// cost one unit with None. A hart starts without weights.
+    pub fn set_weights(&mut self, weights: Option<Weights>) {
+        if self.weights != weights {
+            #[cfg(feature = "jit")]
+            self.jit.reset();
+            self.weights = weights;
+        }
+    }
+
+    /// Returns what instructions cost, or None if each costs one unit.
+    pub const fn weights(&self) -> Option<&Weights> {
+        self.weights.as_ref()
+    }
+
+    /// Executes instructions from `memory` until `budget` units have been spent, or until an
     /// `ecall`, an `ebreak`, a [`Fault`] or an error of the memory stops execution earlier.
+    ///
+    /// An instruction costs one unit, or the weight that [`Cpu::set_weights`] gave to its opcode.
+    /// The hart stops with [`Stop::Budget`], before executing an instruction, if the budget that
+    /// remains does not cover it.
     ///
     /// The instructions that the hart has decoded stay coherent with `memory` as long as the memory
     /// reports the writes to them, as [`Memory`] describes.
@@ -103,6 +133,9 @@ impl Cpu {
         ctx: &mut C,
     ) -> Stop<M::Error> {
         let mut remaining = budget;
+        // The instructions retired, as far as the budget does not tell: see [`execute`].
+        let mut retired = 0;
+        let weighted = self.weights.is_some();
 
         let stop = loop {
             while let Some(page) = memory.pop_dirty() {
@@ -127,9 +160,20 @@ impl Cpu {
             let jit = self.jit.enabled();
             #[cfg(not(feature = "jit"))]
             let jit = false;
+            let (table, page_budget) =
+                self.weights.as_ref().map_or((&UNWEIGHED, SLOTS as u64), |weights| {
+                    (weights.by_code(), weights.page_budget())
+                });
+            let instret = self.instret + if weighted { retired } else { budget - remaining };
             macro_rules! run {
-                ($precise:literal, $jit:literal, $tracer:expr, $ctx:expr, $instret:expr) => {
-                    execute::<M, _, _, $precise, $jit>(
+                ($precise:literal, $jit:literal, false, $tracer:expr, $ctx:expr) => {
+                    run!(@call execute::<M, _, _, $precise, $jit, false>, $tracer, $ctx)
+                };
+                ($precise:literal, $jit:literal, true, $tracer:expr, $ctx:expr) => {
+                    run!(@call execute_weighted::<M, _, _, $precise, $jit>, $tracer, $ctx)
+                };
+                (@call $function:expr, $tracer:expr, $ctx:expr) => {
+                    $function(
                         &mut self.registers,
                         #[cfg(feature = "a")]
                         &mut self.reservation,
@@ -144,27 +188,38 @@ impl Cpu {
                         &mut remaining,
                         $tracer,
                         $ctx,
-                        $instret,
+                        instret,
+                        table,
+                        page_budget,
+                        &mut retired,
                     )
                 };
             }
             let (exit, pc) = if T::ENABLED {
                 // A tracer sees every instruction, so the budget is checked before each of them
                 // and nothing is compiled.
-                let instret = self.instret + (budget - remaining);
-                run!(true, false, &mut *tracer, &mut *ctx, instret)
+                if weighted {
+                    run!(true, false, true, &mut *tracer, &mut *ctx)
+                } else {
+                    run!(true, false, false, &mut *tracer, &mut *ctx)
+                }
             } else {
-                match (remaining >= SLOTS as u64, jit) {
-                    (true, false) => run!(false, false, &mut (), &mut (), 0),
-                    (true, true) => run!(false, true, &mut (), &mut (), 0),
-                    (false, false) => run!(true, false, &mut (), &mut (), 0),
-                    (false, true) => run!(true, true, &mut (), &mut (), 0),
+                match (remaining >= page_budget, jit, weighted) {
+                    (true, false, false) => run!(false, false, false, &mut (), &mut ()),
+                    (true, true, false) => run!(false, true, false, &mut (), &mut ()),
+                    (false, false, false) => run!(true, false, false, &mut (), &mut ()),
+                    (false, true, false) => run!(true, true, false, &mut (), &mut ()),
+                    (true, false, true) => run!(false, false, true, &mut (), &mut ()),
+                    (true, true, true) => run!(false, true, true, &mut (), &mut ()),
+                    (false, false, true) => run!(true, false, true, &mut (), &mut ()),
+                    (false, true, true) => run!(true, true, true, &mut (), &mut ()),
                 }
             };
             self.pc = pc;
 
             match exit {
                 Exit::Leave => {}
+                Exit::Budget => break Stop::Budget,
                 Exit::Decode => {
                     if let Err(error) = self.code.decode(memory, page, slot_of(pc)) {
                         break Stop::Memory(error);
@@ -181,11 +236,19 @@ impl Cpu {
                 Exit::Fault(fault) => break Stop::Fault(fault),
                 Exit::Memory(error) => break Stop::Memory(error),
                 #[cfg(feature = "jit")]
-                Exit::Hot => self.enter_region(memory, page, position, slot_of(pc), &mut remaining),
+                Exit::Hot => self.enter_region(
+                    memory,
+                    page,
+                    position,
+                    slot_of(pc),
+                    &mut remaining,
+                    &mut retired,
+                ),
             }
         };
 
-        self.instret += budget - remaining;
+        self.spent += budget - remaining;
+        self.instret += if weighted { retired } else { budget - remaining };
         stop
     }
 }

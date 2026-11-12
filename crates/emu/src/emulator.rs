@@ -5,7 +5,7 @@ use crate::{
     kernel::{AsyncKernel, Kernel, Syscall, SyscallError},
 };
 use brisc_hw::{
-    cpu::{Cpu, Fault, Stop, Tracer},
+    cpu::{Cpu, Fault, Stop, Tracer, Weights},
     memory::Memory,
     XWord, REG_A7,
 };
@@ -23,6 +23,11 @@ pub enum EmulationError<K, M> {
     /// [`Cpu::pc`] past it as [`Stop::Ebreak`] describes.
     #[error("the guest executed an ebreak")]
     Ebreak,
+
+    /// The budget does not cover the next instruction of the guest, which is left unexecuted. To
+    /// continue, raise [`Emulator::budget`] and run again.
+    #[error("the budget does not cover the next instruction")]
+    Budget,
 
     /// The memory failed an access, by the guest or by the kernel.
     #[error("the memory failed an access")]
@@ -56,6 +61,11 @@ impl<K, M> From<SyscallError<K, M>> for EmulationError<K, M> {
 ///
 /// The hart is a public field, so its registers, program counter and configuration are there to
 /// inspect and change between runs.
+///
+/// The guest runs on a budget, which it spends instruction by instruction:
+/// [`Emulator::with_weights`] says how much each kind of instruction costs, and the run ends with
+/// [`EmulationError::Budget`] when the budget does not cover the next one. By default an
+/// instruction costs one unit and the budget is unlimited.
 #[derive(Debug)]
 pub struct Emulator<M, K, S = (), T = ()> {
     /// The hart.
@@ -68,12 +78,16 @@ pub struct Emulator<M, K, S = (), T = ()> {
     pub ctx: S,
     /// The tracer of the instructions.
     pub tracer: T,
+    /// What the guest may still spend, in the units of [`Cpu::run`]. Running the guest
+    /// subtracts what it spends.
+    pub budget: u64,
 }
 
 impl<M: Memory, K, S> Emulator<M, K, S> {
-    /// Creates an emulator whose hart starts at address zero and does not trace.
+    /// Creates an emulator whose hart starts at address zero, does not trace and has an unlimited
+    /// budget.
     pub fn new(memory: M, kernel: K, ctx: S) -> Self {
-        Self { cpu: Cpu::new(0), memory, kernel, ctx, tracer: () }
+        Self { cpu: Cpu::new(0), memory, kernel, ctx, tracer: (), budget: u64::MAX }
     }
 }
 
@@ -81,8 +95,22 @@ impl<M: Memory, K, S, T: Tracer<M, S>> Emulator<M, K, S, T> {
     /// Sets the tracer that sees every instruction, in place of the one that there is.
     #[must_use]
     pub fn with_tracer<T2: Tracer<M, S>>(self, tracer: T2) -> Emulator<M, K, S, T2> {
-        let Self { cpu, memory, kernel, ctx, .. } = self;
-        Emulator { cpu, memory, kernel, ctx, tracer }
+        let Self { cpu, memory, kernel, ctx, budget, .. } = self;
+        Emulator { cpu, memory, kernel, ctx, tracer, budget }
+    }
+
+    /// Sets what the guest may spend.
+    #[must_use]
+    pub const fn with_budget(mut self, budget: u64) -> Self {
+        self.budget = budget;
+        self
+    }
+
+    /// Sets what each kind of instruction costs against the budget.
+    #[must_use]
+    pub fn with_weights(mut self, weights: Weights) -> Self {
+        self.cpu.set_weights(Some(weights));
+        self
     }
 
     /// Sets the program counter, which is where the program starts.
@@ -164,14 +192,16 @@ impl<M: Memory, K, S, T: Tracer<M, S>> Emulator<M, K, S, T> {
 
     /// Executes instructions up to the next system call and returns its number.
     fn run_to_syscall<E>(&mut self) -> Result<XWord, EmulationError<E, M::Error>> {
-        loop {
-            match self.cpu.run_traced(&mut self.memory, u64::MAX, &mut self.tracer, &mut self.ctx) {
-                Stop::Ecall => return Ok(self.cpu.registers.get(REG_A7)),
-                Stop::Ebreak => return Err(EmulationError::Ebreak),
-                Stop::Budget => {}
-                Stop::Fault(fault) => return Err(EmulationError::Fault(fault)),
-                Stop::Memory(error) => return Err(EmulationError::Memory(error)),
-            }
+        let spent = self.cpu.spent;
+        let stop =
+            self.cpu.run_traced(&mut self.memory, self.budget, &mut self.tracer, &mut self.ctx);
+        self.budget -= self.cpu.spent - spent;
+        match stop {
+            Stop::Ecall => Ok(self.cpu.registers.get(REG_A7)),
+            Stop::Ebreak => Err(EmulationError::Ebreak),
+            Stop::Budget => Err(EmulationError::Budget),
+            Stop::Fault(fault) => Err(EmulationError::Fault(fault)),
+            Stop::Memory(error) => Err(EmulationError::Memory(error)),
         }
     }
 

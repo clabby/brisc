@@ -61,6 +61,14 @@ implementations that a memory can replace. The documentation of `Memory` describ
 a context that the caller owns. The default tracer, `()`, is compiled out, so `Cpu::run` pays nothing for the
 feature. A traced hart interprets every instruction and does not compile any.
 
+## Budgets and weights
+
+The budget of `Cpu::run` counts instructions by default. `Cpu::set_weights` gives each opcode a weight
+instead, and the budget then counts the units that the instructions cost: `run` stops with
+`Stop::Budget` when the next instruction costs more than what is left, without executing it, and
+`Cpu::spent` tells how much has been spent. The units mean whatever the weights say they do: cycles,
+energy, a price. Compiled code spends the budget exactly as the interpreter does, so the JIT stays on.
+
 ## The JIT compiler
 
 With the `jit` feature, the processor compiles loops that run often to machine code. It counts how

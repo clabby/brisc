@@ -26,7 +26,11 @@ pub enum Stop<E = Infallible> {
     ///
     /// [`Cpu::pc`]: super::Cpu::pc
     Ebreak,
-    /// The requested number of instructions has been retired.
+    /// The budget does not cover the instruction at the program counter, which has not been
+    /// executed. Without [`Weights`] this is the case once the requested number of instructions
+    /// has been retired.
+    ///
+    /// [`Weights`]: super::Weights
     Budget,
     /// The instruction at the program counter cannot be executed. It changed no state.
     Fault(Fault),

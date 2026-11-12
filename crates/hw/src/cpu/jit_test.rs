@@ -2,7 +2,8 @@
 //!
 //! Every test runs a program twice, on the interpreter alone and with the JIT compiling loops as
 //! soon as they repeat, and compares the two after every slice of the budget: the stop, the
-//! registers, the program counter, the number of instructions retired and the memory.
+//! registers, the program counter, the number of instructions retired, what they cost and the
+//! memory.
 
 use super::*;
 use crate::memory::{Memory, SparseMemory};
@@ -20,6 +21,7 @@ struct Snapshot {
     registers: [XWord; 32],
     pc: XWord,
     instret: u64,
+    spent: u64,
     memory: Vec<u8>,
     pages: usize,
 }
@@ -35,7 +37,12 @@ const fn inline(optimize_after: Option<u64>) -> JitConfig {
     }
 }
 
-fn machine(code: &[u8], registers: &[XWord; 32], jit: Option<JitConfig>) -> (Cpu, SparseMemory) {
+fn machine(
+    code: &[u8],
+    registers: &[XWord; 32],
+    jit: Option<JitConfig>,
+    weights: Option<Weights>,
+) -> (Cpu, SparseMemory) {
     let mut memory = SparseMemory::new();
     memory.write(CODE, code).unwrap();
     let mut rng = Rng(0x1234_5678_9abc_def1);
@@ -43,6 +50,7 @@ fn machine(code: &[u8], registers: &[XWord; 32], jit: Option<JitConfig>) -> (Cpu
     memory.write(DATA, &data).unwrap();
     let mut cpu = Cpu::new(CODE);
     cpu.set_jit(jit);
+    cpu.set_weights(weights);
     for (i, value) in registers.iter().enumerate() {
         cpu.registers.set(i, *value);
     }
@@ -58,6 +66,7 @@ fn snapshot(cpu: &Cpu, memory: &mut SparseMemory, stop: Stop) -> Snapshot {
         registers: core::array::from_fn(|i| cpu.registers.get(i)),
         pc: cpu.pc,
         instret: cpu.instret,
+        spent: cpu.spent,
         memory: image,
         pages: memory.page_count(),
     }
@@ -73,8 +82,8 @@ struct Outcome {
     stop: Stop,
 }
 
-/// Runs `code` on both engines in slices of the given sizes, until `total` instructions have
-/// been retired or the program stops, and reports what happened.
+/// Runs `code` on both engines in slices of the given sizes, until `total` units have been
+/// spent or the program stops, and reports what happened.
 fn compare(
     code: &[u8],
     registers: &[XWord; 32],
@@ -83,19 +92,39 @@ fn compare(
     what: &str,
     config: JitConfig,
 ) -> Outcome {
-    let (mut plain, mut plain_memory) = machine(code, registers, None);
-    let (mut jitted, mut jitted_memory) = machine(code, registers, Some(config));
-    let mut retired = 0;
+    compare_weighted(code, registers, slices, total, what, config, None)
+}
+
+/// Like [`compare`], with weights for the opcodes.
+fn compare_weighted(
+    code: &[u8],
+    registers: &[XWord; 32],
+    slices: &[u64],
+    total: u64,
+    what: &str,
+    config: JitConfig,
+    weights: Option<Weights>,
+) -> Outcome {
+    let weighted = weights.is_some();
+    let (mut plain, mut plain_memory) = machine(code, registers, None, weights.clone());
+    let (mut jitted, mut jitted_memory) = machine(code, registers, Some(config), weights);
+    let mut spent = 0;
     for slice in slices.iter().cycle() {
-        let budget = (*slice).min(total - retired);
+        let budget = (*slice).min(total - spent);
         let a = plain.run(&mut plain_memory, budget);
         let b = jitted.run(&mut jitted_memory, budget);
         let a = snapshot(&plain, &mut plain_memory, a);
         let b = snapshot(&jitted, &mut jitted_memory, b);
         assert_eq!(a, b, "{what}: after {} instructions", plain.instret);
-        retired = plain.instret;
-        if a.stop != Stop::Budget || retired >= total {
-            return Outcome { compiled: jitted.jit_stats().retired, retired, stop: a.stop };
+        spent = plain.spent;
+        // With weights, what remains may not cover the next instruction, and nothing more runs.
+        let unaffordable = if weighted { total - spent < MAX_WEIGHT } else { spent >= total };
+        if a.stop != Stop::Budget || unaffordable {
+            return Outcome {
+                compiled: jitted.jit_stats().retired,
+                retired: plain.instret,
+                stop: a.stop,
+            };
         }
     }
     unreachable!("the slices repeat")
@@ -155,7 +184,7 @@ fn code_that_a_compiled_loop_overwrites_runs_as_rewritten() {
         bne t2, a1, -20;
         ecall;
     };
-    let (mut cpu, mut memory) = machine(&code, &[0; 32], Some(inline(None)));
+    let (mut cpu, mut memory) = machine(&code, &[0; 32], Some(inline(None)), None);
     assert_eq!(cpu.run(&mut memory, u64::MAX), Stop::Ecall);
     assert!(cpu.jit_stats().retired > 100, "the loop ran in compiled code");
     // 199 iterations add one, the 200th adds one before the rewrite, the last 100 add two.
@@ -186,6 +215,36 @@ fn a_loop_that_stores_to_its_own_page_leaves_the_region() {
     };
     compare(&code, &[0; 32], &[u64::MAX], u64::MAX, "stores in the code page", inline(None));
 }
+
+#[test]
+fn compiled_regions_spend_by_the_weights_in_force() {
+    let code = rv_code! {
+        addi a0, zero, 0;
+        addi a1, zero, 1000;
+        add a0, a0, a1;
+        addi a1, a1, -1;
+        bne a1, zero, -8;
+        ecall;
+    };
+    let by_opcode = |scale: u32| Weights::new(move |opcode| scale * (1 + opcode as u32 % 3));
+    let (mut plain, mut plain_memory) = machine(&code, &[0; 32], None, Some(by_opcode(1)));
+    let (mut jitted, mut jitted_memory) =
+        machine(&code, &[0; 32], Some(inline(None)), Some(by_opcode(1)));
+    for scale in [1, 4, 2] {
+        // The regions compiled under the previous weights must not run under these.
+        plain.set_weights(Some(by_opcode(scale)));
+        jitted.set_weights(Some(by_opcode(scale)));
+        let a = plain.run(&mut plain_memory, 3000);
+        let b = jitted.run(&mut jitted_memory, 3000);
+        let a = snapshot(&plain, &mut plain_memory, a);
+        let b = snapshot(&jitted, &mut jitted_memory, b);
+        assert_eq!(a, b, "weights scaled by {scale}");
+    }
+    assert!(jitted.jit_stats().retired > 0, "some of the program ran in compiled code");
+}
+
+/// The largest weight that the tests give to an opcode.
+const MAX_WEIGHT: u64 = 9;
 
 /// A small deterministic generator.
 struct Rng(u64);
@@ -332,7 +391,24 @@ fn random_programs_run_alike() {
         // Compile with optimizations at once, or quickly and never again, or quickly and
         // again after a few instructions.
         let config = inline([None, Some(u64::MAX), Some(200)][rng.below(3) as usize]);
-        let outcome = compare(&code, &registers, &slices, 6000, &format!("seed {seed}"), config);
+        // Every other program weighs its instructions, and runs for as many units as the others
+        // run instructions.
+        let weights = (seed % 2 == 0).then(|| {
+            Weights::new(|opcode| {
+                let mut weight =
+                    Rng(seed ^ (opcode as u64 + 1).wrapping_mul(0x9e37_79b9_7f4a_7c15));
+                1 + weight.below(MAX_WEIGHT) as u32
+            })
+        });
+        let outcome = compare_weighted(
+            &code,
+            &registers,
+            &slices,
+            6000,
+            &format!("seed {seed}"),
+            config,
+            weights,
+        );
         compiled += outcome.compiled;
         retired += outcome.retired;
         let kind = match outcome.stop {
