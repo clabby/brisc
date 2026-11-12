@@ -29,6 +29,10 @@ following features:
 The `jit` feature adds a compiler for hot loops, which is off by default because it needs the
 standard library and a 64-bit hart. Use `Emulator::with_jit` to configure it. See `brisc-hw` for what it does.
 
+## Tracing
+
+`Emulator::with_tracer` sets a `Tracer` that sees every instruction before it executes. See `brisc-hw`.
+
 ## Usage
 
 ```rust

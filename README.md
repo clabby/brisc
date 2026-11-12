@@ -7,20 +7,21 @@
 
 <img src="./assets/banner.png" alt="Brisc" align="right" width="250px" align="center">
 
-Brisc is a collection of libraries that assemble a RISC-V runtime. It is intended for executing single-threaded
-programs targeting the unprivileged `riscv{32/64}i{mac}` ISAs.
+Brisc is a collection of libraries for running single-threaded RISC-V programs targeting the unprivileged
+`riscv{32/64}i{mac}` ISAs.
 
-### Development Status
+`brisc` is in active development and is not ready for production use.
 
-`brisc` is currently in active development, and is not yet ready for use in production.
-
-## Overview
+## Crates
 
 Each crate builds on the one before it:
 
-- [`brisc-isa`](./crates/isa) - The instruction set: architecture types, instructions, and their decoding, encoding and assembly.
-- [`brisc-hw`](./crates/hw) - The hart: an interpreter with its register file, the memory interface it reaches memory and devices through, and a memory.
-- [`brisc-emu`](./crates/emu) - The emulator: a hart on a memory of your choice with a kernel of your choice, sync or async, and an ELF loader.
+- [`brisc-isa`](./crates/isa): instructions, with their decoding, encoding and assembly.
+- [`brisc-jit`](./crates/jit): a [Cranelift](https://cranelift.dev) compiler for RISC-V regions. It is a library
+  for `brisc-hw`, not something you call yourself.
+- [`brisc-hw`](./crates/hw): the hart, an interpreter with its registers, the `Memory` trait that it reaches memory
+  and devices through, and a sparse RAM. With the `jit` feature it also compiles hot loops.
+- [`brisc-emu`](./crates/emu): a hart on a memory and a kernel of your choice, sync or async, and an ELF loader.
 
 ## Contributing
 

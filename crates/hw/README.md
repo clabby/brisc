@@ -55,6 +55,12 @@ cannot fail uses `Infallible`, and the processor's checks compile to nothing. In
 fetches, bulk reads and writes, and the reporting of writes to code have default
 implementations that a memory can replace. The documentation of `Memory` describes the contract.
 
+## Tracing
+
+`Cpu::run_traced` shows each instruction to a `Tracer` before it executes, with the registers, the memory and
+a context that the caller owns. The default tracer, `()`, is compiled out, so `Cpu::run` pays nothing for the
+feature. A traced hart interprets every instruction and does not compile any.
+
 ## The JIT compiler
 
 With the `jit` feature, the processor compiles loops that run often to machine code. It counts how
