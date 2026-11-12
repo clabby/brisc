@@ -28,7 +28,7 @@ test-docs:
 build *args='':
   cargo build --workspace --all $@
 
-# Run FPP tests
+# Run tests
 test *args='':
   cargo nextest run --workspace --all $@
 

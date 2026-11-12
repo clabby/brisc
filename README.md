@@ -23,6 +23,28 @@ Each crate builds on the one before it:
   and devices through, and a sparse RAM. With the `jit` feature it also compiles hot loops.
 - [`brisc-emu`](./crates/emu): a hart on a memory and a kernel of your choice, sync or async, and an ELF loader.
 
+## Benchmarks
+
+Wall-clock time to run each 64-bit guest in `rv-tests/bin` to completion, on an Apple M4 Max with Rust 1.99. Each
+figure is the best of nine runs. The JIT column includes the time the program spends before its loops are compiled, and
+the compiler runs on a background thread. The geometric mean speedup is 2.4x.
+
+| Program | Instructions | Interpreter | JIT | Speedup |
+| --- | ---: | ---: | ---: | ---: |
+| `bfvm` | 6.6 M | 8.0 ms (823 MIPS) | 6.1 ms (1081 MIPS) | 1.3x |
+| `crc-rle` | 7.9 M | 7.1 ms (1111 MIPS) | 4.5 ms (1753 MIPS) | 1.6x |
+| `fib` | 29.6 M | 26.1 ms (1135 MIPS) | 6.6 ms (4484 MIPS) | 3.9x |
+| `hashmap` | 13.6 M | 14.2 ms (963 MIPS) | 5.9 ms (2311 MIPS) | 2.4x |
+| `mandelbrot` | 6.6 M | 3.7 ms (1806 MIPS) | 1.0 ms (6551 MIPS) | 3.6x |
+| `matmul` | 10.3 M | 7.3 ms (1397 MIPS) | 2.5 ms (4116 MIPS) | 2.9x |
+| `quicksort-heap` | 38.8 M | 32.8 ms (1185 MIPS) | 12.3 ms (3169 MIPS) | 2.7x |
+| `sha256` | 10.7 M | 7.2 ms (1479 MIPS) | 5.4 ms (1981 MIPS) | 1.3x |
+| `sieve` | 19.3 M | 13.4 ms (1439 MIPS) | 2.9 ms (6727 MIPS) | 4.7x |
+| `tree` | 19.2 M | 24.6 ms (780 MIPS) | 14.5 ms (1322 MIPS) | 1.7x |
+
+Programs with tight arithmetic loops gain the most. Run the Criterion benchmarks with
+`cargo bench -p brisc-emu --features test-utils,jit`.
+
 ## Contributing
 
 See [`CONTRIBUTING.md`](./CONTRIBUTING.md)
