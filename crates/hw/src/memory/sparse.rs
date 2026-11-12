@@ -39,16 +39,49 @@ struct Frame([u8; PAGE_SIZE]);
 
 const _: () = assert!(align_of::<Frame>() == PAGE_SIZE && size_of::<Frame>() == PAGE_SIZE);
 
+/// What it costs to grow a [`SparseMemory`]: to map pages that no access has written to yet.
+///
+/// The cost is in the units of the budget of [`Cpu::run`](crate::cpu::Cpu::run) and is charged to
+/// the hart that makes the store that maps the pages. It is a function of the number of mapped
+/// pages before and after, so it can be linear or grow faster than that. Any `Fn(usize, usize) ->
+/// u64` is a [`Growth`], and so is `()`, which makes growing free.
+pub trait Growth {
+    /// Whether growing can cost anything. If not, the memory does not ask for a price.
+    const CHARGES: bool;
+
+    /// Returns the cost of growing from `before` mapped pages to `after`, which is more.
+    fn cost(&self, before: usize, after: usize) -> u64;
+}
+
+impl Growth for () {
+    const CHARGES: bool = false;
+
+    fn cost(&self, _: usize, _: usize) -> u64 {
+        0
+    }
+}
+
+impl<F: Fn(usize, usize) -> u64> Growth for F {
+    const CHARGES: bool = true;
+
+    fn cost(&self, before: usize, after: usize) -> u64 {
+        self(before, after)
+    }
+}
+
 /// A [`Memory`] that is all memory, with pages mapped on first write.
 ///
 /// Every address is readable and writable, so no access fails. Memory that was never written
 /// reads as zero, and reading it does not map a page.
 ///
+/// A [`Growth`] can put a price on mapping pages: see [`SparseMemory::with_growth`]. Only the
+/// accesses of the hart pay it, and an access that maps no page is free.
+///
 /// Pages are backed by page-aligned 4 KiB frames in one contiguous allocation. A direct-mapped
 /// translation cache in front of the page table turns the common load or store into a tag
 /// comparison and a copy.
 #[derive(Clone)]
-pub struct SparseMemory {
+pub struct SparseMemory<G = ()> {
     /// The frames. Frame 0 is never written and backs every unmapped page.
     frames: Vec<Frame>,
     /// The frame number of every mapped page.
@@ -59,6 +92,8 @@ pub struct SparseMemory {
     dirty: Vec<PageIndex>,
     /// The translation cache, indexed by the low bits of the page index.
     tlb: Box<[TlbEntry; TLB_ENTRIES]>,
+    /// What growing costs.
+    growth: G,
     /// What compiled code may use to probe [`Self::tlb`].
     #[cfg(feature = "jit")]
     probe: brisc_jit::Probe,
@@ -75,14 +110,14 @@ const _: () = {
     assert!(PAGE_SIZE as i64 == brisc_jit::FRAME_SIZE);
 };
 
-impl Default for SparseMemory {
+impl Default for SparseMemory<()> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl SparseMemory {
-    /// Creates an empty memory.
+impl SparseMemory<()> {
+    /// Creates an empty memory, in which growing is free.
     pub fn new() -> Self {
         let tlb = vec![TlbEntry { read: NO_PAGE, write: NO_PAGE, frame: 0 }; TLB_ENTRIES];
         let memory = Self {
@@ -91,6 +126,7 @@ impl SparseMemory {
             watched: vec![false],
             dirty: Vec::new(),
             tlb: tlb.into_boxed_slice().try_into().expect("the TLB has TLB_ENTRIES entries"),
+            growth: (),
             // SAFETY: It describes nothing and is replaced before it is handed out.
             #[cfg(feature = "jit")]
             probe: unsafe { brisc_jit::Probe::new(core::ptr::null(), core::ptr::null_mut()) },
@@ -103,6 +139,32 @@ impl SparseMemory {
         };
         memory
     }
+}
+
+impl<G> SparseMemory<G> {
+    /// Prices growth with `growth`, in place of the price that there is.
+    pub fn with_growth<G2: Growth>(self, growth: G2) -> SparseMemory<G2> {
+        let Self {
+            frames,
+            pages,
+            watched,
+            dirty,
+            tlb,
+            #[cfg(feature = "jit")]
+            probe,
+            ..
+        } = self;
+        SparseMemory {
+            frames,
+            pages,
+            watched,
+            dirty,
+            tlb,
+            growth,
+            #[cfg(feature = "jit")]
+            probe,
+        }
+    }
 
     /// Makes the probe describe the software TLB and the frames where they are now.
     #[cfg(feature = "jit")]
@@ -112,7 +174,9 @@ impl SparseMemory {
         // contiguous allocation. A hit in the software TLB is an access that load or store
         // performs in the same way, because they use the same entries and cannot fail: the zero
         // frame serves reads of pages that are not mapped, and a page that is not mapped or is
-        // watched has no write tag.
+        // watched has no write tag. A hit costs nothing: loads are never priced, and a store only
+        // hits on a page that is mapped, which is the case that [`Memory::access_cost`] does not
+        // charge for.
         self.probe = unsafe {
             brisc_jit::Probe::new(self.tlb.as_ptr().cast(), self.frames.as_mut_ptr().cast())
         };
@@ -196,14 +260,38 @@ impl SparseMemory {
     }
 }
 
-impl fmt::Debug for SparseMemory {
+impl<G> fmt::Debug for SparseMemory<G> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SparseMemory").field("pages", &self.pages.len()).finish_non_exhaustive()
     }
 }
 
-impl Memory for SparseMemory {
+impl<G: Growth> Memory for SparseMemory<G> {
     type Error = Infallible;
+
+    const CHARGES: bool = G::CHARGES;
+
+    fn access_cost(&self, address: Address, len: usize, write: bool) -> u64 {
+        if !G::CHARGES || !write || len == 0 {
+            return 0;
+        }
+        // The pages that the store maps are the ones it covers that no store has mapped yet.
+        let mut unmapped = 0;
+        let mut address = address;
+        let mut remaining = len;
+        while remaining > 0 {
+            let piece = remaining.min(PAGE_SIZE - page_offset(address));
+            unmapped += usize::from(!self.pages.contains_key(&page_index(address)));
+            address = address.wrapping_add(piece as Address);
+            remaining -= piece;
+        }
+        if unmapped == 0 {
+            0
+        } else {
+            let before = self.pages.len();
+            self.growth.cost(before, before + unmapped)
+        }
+    }
 
     #[inline(always)]
     fn load<const N: usize>(&mut self, address: Address) -> Result<[u8; N], Infallible> {

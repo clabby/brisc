@@ -7,6 +7,7 @@
 //! [`Cpu::run`]: brisc_hw::cpu::Cpu::run
 //! [`Stop::Ecall`]: brisc_hw::cpu::Stop::Ecall
 
+use crate::Budget;
 use brisc_hw::{
     cpu::Registers,
     memory::{Address, Memory},
@@ -34,6 +35,11 @@ pub enum SyscallError<K, M> {
     /// The kernel cannot service the system call.
     #[error("the kernel cannot service the system call")]
     Kernel(K),
+    /// The budget does not cover the system call: see [`Budget::charge`]. The system call has
+    /// not been serviced, and running the guest again makes it again, after executing the `ecall`
+    /// once more.
+    #[error("the budget does not cover the system call")]
+    Budget,
     /// The memory failed an access that the kernel made.
     #[error("the memory failed an access by the kernel")]
     Memory(M),
@@ -51,13 +57,14 @@ impl<K, M> From<M> for SyscallError<K, M> {
 /// to read and modify. `T` is the [`Tracer`](brisc_hw::cpu::Tracer) of the emulator that runs the
 /// guest, which every system call receives so that the kernel can log what it does. A kernel that
 /// ignores the tracer implements the trait for every `T`; one that logs asks for the tracer it
-/// logs to. The tracer below never sees an instruction, because it does not ask for them, and still
-/// records every system call:
+/// logs to. `budget` is what the guest may still spend, which the kernel can charge for its own
+/// work. The tracer below never sees an instruction, because it does not ask for them, and still
+/// records every system call, which costs ten units:
 ///
 /// ```
 /// use brisc_emu::{
 ///     kernel::{Kernel, Syscall, SyscallError},
-///     Emulator,
+///     Budget, EmulationError, Emulator,
 /// };
 /// use brisc_hw::{
 ///     cpu::{Registers, Step, Tracer},
@@ -97,7 +104,9 @@ impl<K, M> From<M> for SyscallError<K, M> {
 ///         _: &mut Registers,
 ///         _: &mut (),
 ///         tracer: &mut T,
+///         budget: &mut Budget,
 ///     ) -> Result<Syscall, SyscallError<(), M::Error>> {
+///         budget.charge(10)?;
 ///         tracer.log(syscall_no);
 ///         Ok(if syscall_no == 93 { Syscall::Exit(0) } else { Syscall::Continue })
 ///     }
@@ -115,7 +124,23 @@ impl<K, M> From<M> for SyscallError<K, M> {
 ///     Emulator::new(memory, LoggingKernel, ()).with_entry(0x1000).with_tracer(Events::default());
 ///
 /// assert_eq!(emu.run(), Ok(0));
-/// assert_eq!(emu.tracer.0, [7, 93]);
+/// assert_eq!(emu.tracer().0, [7, 93]);
+/// // The two system calls cost twenty units, and the four instructions four.
+/// let parts = emu.into_parts();
+/// assert_eq!(parts.budget.spent(), 24);
+/// assert_eq!(parts.budget.remaining(), Budget::MAX - 24);
+/// assert_eq!(parts.tracer.0, [7, 93]);
+///
+/// // A budget that covers the instructions but not the second system call stops it, with the
+/// // first one logged.
+/// let mut memory = SparseMemory::new();
+/// memory.write(0x1000, &code).unwrap();
+/// let mut emu = Emulator::new(memory, LoggingKernel, ())
+///     .with_entry(0x1000)
+///     .with_tracer(Events::default())
+///     .with_budget(15);
+/// assert_eq!(emu.run(), Err(EmulationError::Budget));
+/// assert_eq!(emu.tracer().0, [7]);
 /// ```
 pub trait Kernel<S, T = ()> {
     /// The error returned when a system call cannot be serviced.
@@ -130,6 +155,7 @@ pub trait Kernel<S, T = ()> {
         registers: &mut Registers,
         state: &mut S,
         tracer: &mut T,
+        budget: &mut Budget,
     ) -> Result<Syscall, SyscallError<Self::Error, M::Error>>;
 }
 
@@ -151,6 +177,7 @@ pub trait AsyncKernel<S, T = ()> {
         registers: &mut Registers,
         state: &mut S,
         tracer: &mut T,
+        budget: &mut Budget,
     ) -> impl Future<Output = Result<Syscall, SyscallError<Self::Error, M::Error>>>;
 }
 
@@ -164,8 +191,9 @@ impl<S, T, K: Kernel<S, T>> AsyncKernel<S, T> for K {
         registers: &mut Registers,
         state: &mut S,
         tracer: &mut T,
+        budget: &mut Budget,
     ) -> impl Future<Output = Result<Syscall, SyscallError<Self::Error, M::Error>>> {
-        ready(Kernel::syscall(self, syscall_no, memory, registers, state, tracer))
+        ready(Kernel::syscall(self, syscall_no, memory, registers, state, tracer, budget))
     }
 }
 
@@ -180,6 +208,7 @@ impl<S, T> Kernel<S, T> for () {
         _: &mut Registers,
         _: &mut S,
         _: &mut T,
+        _: &mut Budget,
     ) -> Result<Syscall, SyscallError<Self::Error, M::Error>> {
         Err(SyscallError::Kernel(()))
     }
@@ -219,6 +248,7 @@ impl<S: Extend<u8>, T> Kernel<S, T> for MinimalKernel {
         registers: &mut Registers,
         output: &mut S,
         _: &mut T,
+        _: &mut Budget,
     ) -> Result<Syscall, SyscallError<Self::Error, M::Error>> {
         match syscall_no {
             Self::EXIT => Ok(Syscall::Exit(registers.get(REG_A0))),
@@ -272,9 +302,9 @@ mod test {
         let mut emu = Emulator::new(memory, MinimalKernel, Vec::new()).with_entry(0x1000);
 
         assert_eq!(emu.run(), Ok(300));
-        assert_eq!(emu.ctx, message);
+        assert_eq!(emu.ctx(), &message);
 
-        emu.cpu.pc += 4;
+        emu.cpu_mut().pc += 4;
         assert_eq!(emu.run(), Err(EmulationError::Kernel(UnknownSyscall(1))));
     }
 }

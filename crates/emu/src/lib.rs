@@ -7,11 +7,14 @@
 
 extern crate alloc;
 
+mod budget;
+pub use budget::Budget;
+
 pub mod elf;
 pub mod kernel;
 
 mod emulator;
-pub use emulator::{EmulationError, Emulator};
+pub use emulator::{EmulationError, Emulator, Parts};
 
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;

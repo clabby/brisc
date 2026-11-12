@@ -8,9 +8,9 @@ kernel that services its system calls, and a context that the kernel works on:
 - The kernel is a `Kernel` or an `AsyncKernel`. `MinimalKernel` has the `exit` and `write` system
   calls, which is enough for programs that only compute and print.
 - The context is state outside the kernel that every system call receives. The emulator hands
-  it back with `Emulator::take_ctx`.
+  it back, with the tracer and the budget, with `Emulator::into_parts`.
 
-The hart is configured through `Emulator::cpu`, and the crate has an ELF loader to put programs on
+The hart is configured through `Emulator::cpu_mut`, and the crate has an ELF loader to put programs on
 the memory.
 
 ## Features
@@ -33,7 +33,8 @@ standard library and a 64-bit hart. Use `Emulator::with_jit` to configure it. Se
 
 `Emulator::with_weights` and `Emulator::with_budget` limit what a guest may spend, in units that the weights
 define. When the budget does not cover the next instruction, `run` returns `EmulationError::Budget` and
-running again with a larger `budget` continues.
+running again with a larger `budget` continues. A kernel receives the `Budget` with every system call and
+`charge`s it for its own work, and a memory that charges for growth takes its price from the same budget.
 
 ## Tracing
 
@@ -44,7 +45,7 @@ running again with a larger `budget` continues.
 ```rust
 use brisc_emu::{
     kernel::{Kernel, Syscall, SyscallError},
-    Emulator,
+    Budget, Emulator,
 };
 use brisc_hw::{
     memory::Memory,
@@ -97,6 +98,7 @@ impl<T> Kernel<String, T> for ExampleKernel {
         registers: &mut Registers,
         output: &mut String,
         _tracer: &mut T,
+        _budget: &mut Budget,
     ) -> Result<Syscall, SyscallError<XWord, B::Error>> {
         match sysno {
             // exit
@@ -119,7 +121,7 @@ emu.load_elf(&elf).unwrap();
 
 let exit_code = emu.run().unwrap();
 assert_eq!(exit_code, 0);
-assert_eq!(emu.take_ctx(), "Hello, world!\n");
+assert_eq!(emu.into_parts().ctx, "Hello, world!\n");
 ```
 
 A kernel that needs to wait for something implements `AsyncKernel` instead and is driven by

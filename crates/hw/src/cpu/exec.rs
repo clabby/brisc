@@ -180,10 +180,13 @@ pub(super) fn execute<
     page_budget: u64,
     retired: &mut u64,
 ) -> (Exit<M::Error>, XWord) {
-    let budget = (*remaining).min(i64::MAX as u64) as i64;
+    // The budget is at most [`Cpu::MAX_BUDGET`], which fits.
+    let budget = *remaining as i64;
     let mut n = budget;
-    let page_budget = if WEIGHTED { page_budget.min(i64::MAX as u64) as i64 } else { SLOTS as i64 };
-    // The instructions retired, which only has to be counted when they cost different amounts.
+    let page_budget = if WEIGHTED { page_budget as i64 } else { SLOTS as i64 };
+    // The instructions retired, which the budget only tells while every instruction costs one unit
+    // and nothing else is charged.
+    let counted = WEIGHTED || M::CHARGES;
     let mut done = 0u64;
 
     macro_rules! pc {
@@ -212,20 +215,48 @@ pub(super) fn execute<
             let step = Step {
                 pc: pc!(),
                 instruction: op.instruction(),
-                instret: instret + if WEIGHTED { done } else { (budget - n) as u64 },
+                instret: instret + if counted { done } else { (budget - n) as u64 },
             };
             tracer.trace(ctx, &*memory, &*registers, &step);
         }
         n -= cost;
-        if WEIGHTED {
+        if counted {
             done += 1;
         }
-        // Gives back the cost of an instruction that does not retire.
+        // What the memory charged for the accesses of the instruction.
+        let mut charged = 0i64;
+        // Gives back the cost of an instruction that does not retire, and what it was charged.
         macro_rules! refund {
             () => {
-                n += cost;
-                if WEIGHTED {
+                n += cost + charged;
+                if counted {
                     done -= 1;
+                }
+            };
+        }
+        // Pays the price that the memory asks for an access, or leaves without executing the
+        // instruction if the budget does not cover it.
+        macro_rules! charge {
+            ($address:expr, $len:expr, $write:expr) => {
+                if M::CHARGES {
+                    let price =
+                        memory.access_cost($address, $len, $write).min(i64::MAX as u64) as i64;
+                    if price > n {
+                        refund!();
+                        break (Exit::Budget, pc!());
+                    }
+                    n -= price;
+                    charged += price;
+                }
+            };
+        }
+        // Leaves after an instruction that was charged, so that the caller sees the budget that
+        // is left before the next instruction runs: a charge is not bounded by the cost of a run
+        // through the page.
+        macro_rules! leave_if_charged {
+            () => {
+                if M::CHARGES && charged != 0 {
+                    break (Exit::Leave, pc!());
                 }
             };
         }
@@ -281,17 +312,21 @@ pub(super) fn execute<
         }
         macro_rules! load {
             ($advance:ident, $ty:ty) => {{
+                charge!(address!(), size_of::<$ty>(), false);
                 let bytes = access!(memory.load(address!()));
-                set!($advance, <$ty>::from_le_bytes(bytes) as SXWord as XWord)
+                set!($advance, <$ty>::from_le_bytes(bytes) as SXWord as XWord);
+                leave_if_charged!();
             }};
         }
         macro_rules! store {
             ($advance:ident, $ty:ty) => {{
+                charge!(address!(), size_of::<$ty>(), true);
                 let watched = access!(memory.store(address!(), (rs2!() as $ty).to_le_bytes()));
                 slot += $advance;
                 if watched {
                     break (Exit::Leave, pc!());
                 }
+                leave_if_charged!();
             }};
         }
         // Counts a jump back to `$target` and leaves the loop if it has become hot.
@@ -339,10 +374,11 @@ pub(super) fn execute<
         #[cfg(feature = "a")]
         macro_rules! atomic {
             ($advance:ident) => {{
-                match atomic(r, reservation, memory, op) {
-                    Ok(watched) => {
+                match atomic(r, reservation, memory, op, n) {
+                    Ok((leave, price)) => {
+                        n -= price;
                         slot += $advance;
-                        if watched {
+                        if leave {
                             break (Exit::Leave, pc!());
                         }
                     }
@@ -512,7 +548,7 @@ pub(super) fn execute<
     };
 
     *remaining -= (budget - n) as u64;
-    if WEIGHTED {
+    if counted {
         *retired += done;
     }
     exit
@@ -570,27 +606,13 @@ pub(super) fn execute_weighted<
     )
 }
 
-/// Executes an instruction of the A extension. Returns whether it wrote to a watched page, or
-/// why it could not be executed.
+/// Returns the size in bytes of the access of an instruction of the A extension, and whether it
+/// writes. A store-conditional is a write whether or not its reservation holds, so what it costs
+/// does not depend on the outcome.
 #[cfg(feature = "a")]
-#[cold]
-#[inline(never)]
-#[allow(
-    clippy::unnecessary_cast,
-    reason = "XWord is 32 or 64 bits wide depending on the enabled features"
-)]
-fn atomic<M: Memory>(
-    r: &mut [XWord; Registers::LEN],
-    reservation: &mut Option<Address>,
-    memory: &mut M,
-    op: Op,
-) -> Result<bool, Exit<M::Error>> {
+const fn atomic_access(opcode: Opcode) -> (usize, bool) {
     use Opcode::*;
 
-    let opcode = op.opcode();
-    let address = r[op.rs1()];
-    let source = r[op.rs2()];
-    // The access is a word, or else a doubleword.
     let word = matches!(
         opcode,
         LrW | ScW |
@@ -604,9 +626,63 @@ fn atomic<M: Memory>(
             AmominuW |
             AmomaxuW
     );
-    if address & (if word { 3 } else { 7 }) != 0 {
+    let write = !matches!(opcode, LrW);
+    #[cfg(feature = "64-bit")]
+    let write = write && !matches!(opcode, LrD);
+    (if word { 4 } else { 8 }, write)
+}
+
+/// Executes an instruction of the A extension, if the budget `n` that remains covers what the
+/// memory charges for its access. Returns whether the interpreter has to leave its loop after the
+/// instruction, because it wrote to a watched page or was charged, and what it was charged, or why
+/// it could not be executed. Nothing has changed in the second case.
+#[cfg(feature = "a")]
+#[cold]
+#[inline(never)]
+fn atomic<M: Memory>(
+    r: &mut [XWord; Registers::LEN],
+    reservation: &mut Option<Address>,
+    memory: &mut M,
+    op: Op,
+    n: i64,
+) -> Result<(bool, i64), Exit<M::Error>> {
+    let opcode = op.opcode();
+    let (len, write) = atomic_access(opcode);
+    let address = r[op.rs1()];
+    if address & (len as XWord - 1) != 0 {
         return Err(Exit::Fault(Fault::UnalignedAmo));
     }
+    let price = if M::CHARGES {
+        memory.access_cost(address, len, write).min(i64::MAX as u64) as i64
+    } else {
+        0
+    };
+    if price > n {
+        return Err(Exit::Budget);
+    }
+    let watched = perform_atomic(r, reservation, memory, op)?;
+    Ok((watched || price != 0, price))
+}
+
+/// Performs an instruction of the A extension, whose address is aligned. Returns whether it wrote
+/// to a watched page.
+#[cfg(feature = "a")]
+#[allow(
+    clippy::unnecessary_cast,
+    reason = "XWord is 32 or 64 bits wide depending on the enabled features"
+)]
+fn perform_atomic<M: Memory>(
+    r: &mut [XWord; Registers::LEN],
+    reservation: &mut Option<Address>,
+    memory: &mut M,
+    op: Op,
+) -> Result<bool, Exit<M::Error>> {
+    use Opcode::*;
+
+    let opcode = op.opcode();
+    let address = r[op.rs1()];
+    let source = r[op.rs2()];
+    let word = atomic_access(opcode).0 == 4;
 
     let load = |memory: &mut M| -> Result<XWord, Exit<M::Error>> {
         #[cfg(feature = "64-bit")]

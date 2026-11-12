@@ -1,6 +1,7 @@
 //! The emulator: a hart with its memory, and the kernel that services its system calls.
 
 use crate::{
+    budget::Budget,
     elf::{load_elf, LoadError},
     kernel::{AsyncKernel, Kernel, Syscall, SyscallError},
 };
@@ -24,9 +25,14 @@ pub enum EmulationError<K, M> {
     #[error("the guest executed an ebreak")]
     Ebreak,
 
-    /// The budget does not cover the next instruction of the guest, which is left unexecuted. To
-    /// continue, raise [`Emulator::budget`] and run again.
-    #[error("the budget does not cover the next instruction")]
+    /// The budget does not cover what the guest or the kernel needs next.
+    ///
+    /// If it is the next instruction of the guest, or what the memory charges for its access, the
+    /// instruction has not been executed. If it is the work of a system call, the `ecall` has
+    /// been executed and paid for, and the kernel has charged nothing. Either way the budget is
+    /// raised with [`Emulator::budget_mut`] before running again, and running again executes the
+    /// `ecall` again, which costs its weight once more, before the kernel retries the call.
+    #[error("the budget does not cover what is needed next")]
     Budget,
 
     /// The memory failed an access, by the guest or by the kernel.
@@ -42,9 +48,27 @@ impl<K, M> From<SyscallError<K, M>> for EmulationError<K, M> {
     fn from(error: SyscallError<K, M>) -> Self {
         match error {
             SyscallError::Kernel(error) => Self::Kernel(error),
+            SyscallError::Budget => Self::Budget,
             SyscallError::Memory(error) => Self::Memory(error),
         }
     }
+}
+
+/// What an [`Emulator`] consisted of: see [`Emulator::into_parts`].
+#[derive(Debug)]
+pub struct Parts<M, K, S, T> {
+    /// The hart, with its registers and what it has retired and spent.
+    pub cpu: Cpu,
+    /// The memory.
+    pub memory: M,
+    /// The kernel.
+    pub kernel: K,
+    /// The state that the kernel worked on.
+    pub ctx: S,
+    /// The tracer.
+    pub tracer: T,
+    /// The budget, with what remains and what was spent, including by the kernel.
+    pub budget: Budget,
 }
 
 /// A RISC-V hart with its memory, the kernel that services its system calls, and the state that
@@ -59,8 +83,8 @@ impl<K, M> From<SyscallError<K, M>> for EmulationError<K, M> {
 ///   to change. The default, `()`, does not trace and costs nothing. A tracer turns the JIT
 ///   compiler off, as [`Cpu::run_traced`] describes.
 ///
-/// The hart is a public field, so its registers, program counter and configuration are there to
-/// inspect and change between runs.
+/// The hart, the memory, the kernel, the state, the tracer and the budget are reached through
+/// accessors, to inspect and change between runs, and [`Emulator::into_parts`] gives them back.
 ///
 /// The guest runs on a budget, which it spends instruction by instruction:
 /// [`Emulator::with_weights`] says how much each kind of instruction costs, and the run ends with
@@ -68,26 +92,19 @@ impl<K, M> From<SyscallError<K, M>> for EmulationError<K, M> {
 /// instruction costs one unit and the budget is unlimited.
 #[derive(Debug)]
 pub struct Emulator<M, K, S = (), T = ()> {
-    /// The hart.
-    pub cpu: Cpu,
-    /// The memory of the hart, with any devices.
-    pub memory: M,
-    /// The system call interface.
-    pub kernel: K,
-    /// The state that the kernel works on.
-    pub ctx: S,
-    /// The tracer of the instructions.
-    pub tracer: T,
-    /// What the guest may still spend, in the units of [`Cpu::run`]. Running the guest
-    /// subtracts what it spends.
-    pub budget: u64,
+    cpu: Cpu,
+    memory: M,
+    kernel: K,
+    ctx: S,
+    tracer: T,
+    budget: Budget,
 }
 
 impl<M: Memory, K, S> Emulator<M, K, S> {
     /// Creates an emulator whose hart starts at address zero, does not trace and has an unlimited
     /// budget.
     pub fn new(memory: M, kernel: K, ctx: S) -> Self {
-        Self { cpu: Cpu::new(0), memory, kernel, ctx, tracer: (), budget: u64::MAX }
+        Self { cpu: Cpu::new(0), memory, kernel, ctx, tracer: (), budget: Budget::unlimited() }
     }
 }
 
@@ -101,8 +118,8 @@ impl<M: Memory, K, S, T: Tracer<M, S>> Emulator<M, K, S, T> {
 
     /// Sets what the guest may spend.
     #[must_use]
-    pub const fn with_budget(mut self, budget: u64) -> Self {
-        self.budget = budget;
+    pub const fn with_budget(mut self, units: u64) -> Self {
+        self.budget = Budget::new(units);
         self
     }
 
@@ -134,9 +151,71 @@ impl<M: Memory, K, S, T: Tracer<M, S>> Emulator<M, K, S, T> {
         Ok(())
     }
 
-    /// Destroys the emulator and returns the state that the kernel works on.
-    pub fn take_ctx(self) -> S {
-        self.ctx
+    /// The hart.
+    pub const fn cpu(&self) -> &Cpu {
+        &self.cpu
+    }
+
+    /// The hart, to change its registers, its program counter or its configuration.
+    pub const fn cpu_mut(&mut self) -> &mut Cpu {
+        &mut self.cpu
+    }
+
+    /// The memory of the hart, with any devices.
+    pub const fn memory(&self) -> &M {
+        &self.memory
+    }
+
+    /// The memory of the hart, to change it between runs.
+    pub const fn memory_mut(&mut self) -> &mut M {
+        &mut self.memory
+    }
+
+    /// The kernel that services the system calls.
+    pub const fn kernel(&self) -> &K {
+        &self.kernel
+    }
+
+    /// The kernel, to change it between runs.
+    pub const fn kernel_mut(&mut self) -> &mut K {
+        &mut self.kernel
+    }
+
+    /// The state that the kernel works on.
+    pub const fn ctx(&self) -> &S {
+        &self.ctx
+    }
+
+    /// The state that the kernel works on, to change it between runs.
+    pub const fn ctx_mut(&mut self) -> &mut S {
+        &mut self.ctx
+    }
+
+    /// The tracer of the instructions.
+    pub const fn tracer(&self) -> &T {
+        &self.tracer
+    }
+
+    /// The tracer of the instructions, to read what it collected or reset it between runs.
+    pub const fn tracer_mut(&mut self) -> &mut T {
+        &mut self.tracer
+    }
+
+    /// What the guest may still spend, and what it has spent.
+    pub const fn budget(&self) -> &Budget {
+        &self.budget
+    }
+
+    /// The budget, to grant the guest more or to charge it between runs.
+    pub const fn budget_mut(&mut self) -> &mut Budget {
+        &mut self.budget
+    }
+
+    /// Takes the emulator apart, to get back what it owns: the state that the kernel worked on,
+    /// the tracer with what it collected, and the budget with what was spent.
+    pub fn into_parts(self) -> Parts<M, K, S, T> {
+        let Self { cpu, memory, kernel, ctx, tracer, budget } = self;
+        Parts { cpu, memory, kernel, ctx, tracer, budget }
     }
 
     /// Executes the program until it exits, returning its exit code.
@@ -158,6 +237,7 @@ impl<M: Memory, K, S, T: Tracer<M, S>> Emulator<M, K, S, T> {
                 &mut self.cpu.registers,
                 &mut self.ctx,
                 &mut self.tracer,
+                &mut self.budget,
             )?;
             if let Some(exit_code) = self.finish_syscall(syscall) {
                 return Ok(exit_code);
@@ -182,6 +262,7 @@ impl<M: Memory, K, S, T: Tracer<M, S>> Emulator<M, K, S, T> {
                 &mut self.cpu.registers,
                 &mut self.ctx,
                 &mut self.tracer,
+                &mut self.budget,
             )
             .await?;
             if let Some(exit_code) = self.finish_syscall(syscall) {
@@ -192,10 +273,15 @@ impl<M: Memory, K, S, T: Tracer<M, S>> Emulator<M, K, S, T> {
 
     /// Executes instructions up to the next system call and returns its number.
     fn run_to_syscall<E>(&mut self) -> Result<XWord, EmulationError<E, M::Error>> {
-        let spent = self.cpu.spent;
-        let stop =
-            self.cpu.run_traced(&mut self.memory, self.budget, &mut self.tracer, &mut self.ctx);
-        self.budget -= self.cpu.spent - spent;
+        let spent = self.cpu.spent();
+        let stop = self.cpu.run_traced(
+            &mut self.memory,
+            self.budget.remaining(),
+            &mut self.tracer,
+            &mut self.ctx,
+        );
+        // The hart's total wraps around, and the difference does not.
+        self.budget.spend(self.cpu.spent().wrapping_sub(spent));
         match stop {
             Stop::Ecall => Ok(self.cpu.registers.get(REG_A7)),
             Stop::Ebreak => Err(EmulationError::Ebreak),
@@ -238,7 +324,7 @@ mod test {
         // Unmapped memory reads as zero, which is not an instruction.
         let mut emu = emulator(0, SparseMemory::new(), ());
         assert!(matches!(emu.run(), Err(EmulationError::Fault(Fault::Decode(_)))));
-        assert_eq!((emu.cpu.pc, emu.cpu.instret), (0, 0));
+        assert_eq!((emu.cpu.pc, emu.cpu.instret()), (0, 0));
     }
 
     /// The address of an instruction whose first half is the end of a page and whose second
@@ -307,7 +393,7 @@ mod test {
         let mut emu = emulator(0x1000, memory, ());
 
         assert_eq!(emu.run(), Err(EmulationError::Ebreak));
-        assert_eq!((emu.cpu.pc, emu.cpu.instret), (0x1004, 1));
+        assert_eq!((emu.cpu.pc, emu.cpu.instret()), (0x1004, 1));
 
         emu.cpu.pc += 4;
         assert_eq!(emu.run(), Err(EmulationError::Kernel(())));
@@ -334,7 +420,7 @@ mod test {
 
         // The last instruction is what assemblers call `unimp`: a write to a read-only register.
         assert_eq!(emu.run(), Err(EmulationError::Fault(Fault::ReadOnlyCsr(0xc00))));
-        assert_eq!((emu.cpu.pc, emu.cpu.instret), (0x100c, 3));
+        assert_eq!((emu.cpu.pc, emu.cpu.instret()), (0x100c, 3));
         for register in [REG_A0, REG_A1, REG_A2] {
             assert_eq!(emu.cpu.registers.get(register), 0);
         }
@@ -401,6 +487,7 @@ mod test {
             registers: &mut Registers,
             _: &mut (),
             _: &mut T,
+            _: &mut Budget,
         ) -> Result<Syscall, SyscallError<(), M::Error>> {
             let [byte] = memory.load(registers.get(REG_A0))?;
             Ok(Syscall::Exit(byte as XWord))
@@ -422,7 +509,7 @@ mod test {
 
         // The store stops the run before it has changed anything.
         assert_eq!(emu.run(), Err(EmulationError::Memory(OutOfBounds(BoundedMemory::END))));
-        assert_eq!((emu.cpu.pc, emu.cpu.instret), (0x1004, 1));
+        assert_eq!((emu.cpu.pc, emu.cpu.instret()), (0x1004, 1));
 
         // With an address that exists, the run reaches the system call, which reads the byte.
         emu.cpu.registers.set(REG_A1, 0x2000);
@@ -439,7 +526,7 @@ mod test {
 
         // Fetching it does not read past the end, but there is no instruction after it.
         assert_eq!(emu.run(), Err(EmulationError::Memory(OutOfBounds(BoundedMemory::END))));
-        assert_eq!((emu.cpu.pc, emu.cpu.instret), (BoundedMemory::END, 1));
+        assert_eq!((emu.cpu.pc, emu.cpu.instret()), (BoundedMemory::END, 1));
 
         // The kernel passes on the error of its own access.
         emu.memory.write(last, &rv!(ecall).to_le_bytes()).unwrap();

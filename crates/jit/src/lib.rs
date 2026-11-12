@@ -115,8 +115,8 @@ pub enum Quality {
 ///
 /// Generated code reads and writes memory through the probe without asking the memory, so a probe
 /// can only describe a software TLB that serves exactly the accesses that the memory would perform
-/// the same way: with no error and no side effect, and without letting a store reach a page
-/// that the memory has to hear about. That is why a probe can only be made with the unsafe
+/// the same way: with no error, no side effect and no price, and without letting a store reach a
+/// page that the memory has to hear about. That is why a probe can only be made with the unsafe
 /// [`Probe::new`].
 ///
 /// Making a probe without `unsafe` does not compile:
@@ -202,15 +202,40 @@ pub struct Request<'a> {
 pub struct Region {
     /// The code. It takes the register file, a context and the index in [`Region::entries`] of the
     /// instruction to start at.
-    pub entry: Entry,
+    entry: Entry,
     /// The slots at which the region can be entered, in ascending order: its first instruction
     /// and the instructions that jumps back go to.
-    pub entries: Box<[usize]>,
+    entries: Box<[usize]>,
     /// What must remain in the budget to enter the region: the most that the region can spend
     /// before it checks the budget.
-    pub max_cost: u64,
+    max_cost: u64,
     /// The number of instructions in the region.
-    pub instructions: usize,
+    instructions: usize,
+}
+
+impl Region {
+    /// The code. It takes the register file, a context and the index in [`Region::entries`] of the
+    /// instruction to start at.
+    pub const fn entry(&self) -> Entry {
+        self.entry
+    }
+
+    /// The slots at which the region can be entered, in ascending order: its first instruction
+    /// and the instructions that jumps back go to.
+    pub fn entries(&self) -> &[usize] {
+        &self.entries
+    }
+
+    /// What must remain in the budget to enter the region: the most that the region can spend
+    /// before it checks the budget.
+    pub const fn max_cost(&self) -> u64 {
+        self.max_cost
+    }
+
+    /// The number of instructions in the region.
+    pub const fn instructions(&self) -> usize {
+        self.instructions
+    }
 }
 
 /// Compiles regions for the host.

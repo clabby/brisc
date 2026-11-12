@@ -30,7 +30,7 @@ assert_eq!(cpu.run(&mut memory, 1), Stop::Budget);
 assert_eq!(cpu.registers.get(REG_A0), 2);
 assert_eq!(cpu.run(&mut memory, u64::MAX), Stop::Ecall);
 assert_eq!(cpu.registers.get(REG_A0), 32);
-assert_eq!((cpu.pc, cpu.instret), (0x1008, 3));
+assert_eq!((cpu.pc, cpu.instret()), (0x1008, 3));
 ```
 
 ## The processor
@@ -68,6 +68,12 @@ instead, and the budget then counts the units that the instructions cost: `run` 
 `Stop::Budget` when the next instruction costs more than what is left, without executing it, and
 `Cpu::spent` tells how much has been spent. The units mean whatever the weights say they do: cycles,
 energy, a price. Compiled code spends the budget exactly as the interpreter does, so the JIT stays on.
+
+A memory can charge for accesses too, on top of the weight of the instruction. It sets
+`Memory::CHARGES` and answers `Memory::access_cost` before the hart performs a load or a store, and the
+hart stops before an instruction whose accesses the budget does not cover. `SparseMemory::with_growth`
+prices the pages that stores map, as a function of the number of pages before and after, so memory can
+cost more the larger it gets. A memory that does not charge pays nothing for the feature.
 
 ## The JIT compiler
 
