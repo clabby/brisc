@@ -13,7 +13,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: recursive
       - name: Install Rust stable toolchain
@@ -34,7 +34,7 @@ jobs:
     continue-on-error: true
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: true
       - name: Install Rust stable toolchain
@@ -53,7 +53,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: true
       - name: Install Rust stable toolchain
@@ -72,7 +72,7 @@ jobs:
     name: Clippy (feature powerset)
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: recursive
       - uses: taiki-e/install-action@just
@@ -93,7 +93,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: true
       - uses: taiki-e/install-action@just
@@ -114,7 +114,7 @@ jobs:
     continue-on-error: true
     steps:
       - name: Checkout sources
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           submodules: recursive
       - uses: taiki-e/install-action@just
@@ -130,7 +130,7 @@ jobs:
     runs-on: ubuntu-latest
     name: codecov
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: recursive
       - uses: dtolnay/rust-toolchain@stable
@@ -157,7 +157,7 @@ jobs:
       - name: Record Rust version
         run: echo "RUST=$(rustc --version)" >> "$GITHUB_ENV"
       - name: Upload coverage to codecov.io
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -172,7 +172,7 @@ jobs:
   zepter:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           submodules: true
       - name: Install zepter

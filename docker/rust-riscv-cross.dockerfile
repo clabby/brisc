@@ -1,5 +1,5 @@
 FROM ghcr.io/clabby/brisc/riscv-unknown-elf-toolchain:main AS rv-bare
-FROM ubuntu:22.04
+FROM ubuntu:26.04
 
 ARG ARCH
 ARG TARGET_FEATURES

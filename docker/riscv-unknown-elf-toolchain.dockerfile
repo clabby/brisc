@@ -1,4 +1,4 @@
-FROM ubuntu:22.04
+FROM ubuntu:26.04
 
 # Install core build dependencies
 RUN apt-get update && \
@@ -24,7 +24,7 @@ RUN apt-get update && \
   patchutils \
   bc \
   zlib1g-dev \
-  libexpat-dev \
+  libexpat1-dev \
   ninja-build \
   git \
   cmake \

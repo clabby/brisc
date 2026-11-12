@@ -30,7 +30,7 @@ jobs:
       target: ${{ steps.target-spec.outputs.target }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Specify Target
         id: target-spec
         run: |
@@ -49,7 +49,7 @@ jobs:
           echo ${{ steps.platforms.outputs.matrix }}
       - name: Docker meta
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: ${{ env.REGISTRY_IMAGE }}/${{ steps.target-spec.outputs.target }}
           tags: |
@@ -60,7 +60,7 @@ jobs:
         run: |
           mv "${{ steps.meta.outputs.bake-file }}" "${{ runner.temp }}/bake-meta.json"
       - name: Upload meta bake definition
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bake-meta
           path: ${{ runner.temp }}/bake-meta.json
@@ -69,7 +69,7 @@ jobs:
 
   build:
     name: Build Image (${{ needs.prepare.outputs.target }} - ${{ matrix.platform }})
-    runs-on: ${{ matrix.platform == 'linux/amd64' && 'ubuntu-latest' || 'ubuntu-22.04-arm' }}
+    runs-on: ${{ matrix.platform == 'linux/amd64' && 'ubuntu-latest' || 'ubuntu-26.04-arm' }}
     needs:
       - prepare
     strategy:
@@ -82,21 +82,21 @@ jobs:
           platform=${{ matrix.platform }}
           echo "PLATFORM_PAIR=${platform//\//-}" >> $GITHUB_ENV
       - name: Download meta bake definition
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: bake-meta
           path: ${{ runner.temp }}
       - name: Authenticate with container registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
       - name: Build
         id: bake
-        uses: docker/bake-action@v6
+        uses: docker/bake-action@v7
         with:
           files: |
             ./docker/docker-bake.hcl
@@ -112,7 +112,7 @@ jobs:
           digest="${{ fromJSON(steps.bake.outputs.metadata)[needs.prepare.outputs.target]['containerimage.digest'] }}"
           touch "${{ runner.temp }}/digests/${digest#sha256:}"
       - name: Upload digest
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: digests-${{ env.PLATFORM_PAIR }}
           path: ${{ runner.temp }}/digests/*
@@ -127,24 +127,24 @@ jobs:
       - prepare
     steps:
       - name: Download meta bake definition
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: bake-meta
           path: ${{ runner.temp }}
       - name: Download digests
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: ${{ runner.temp }}/digests
           pattern: digests-*
           merge-multiple: true
       - name: Authenticate with container registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
       - name: Create manifest list and push
         working-directory: ${{ runner.temp }}/digests
         run: |
