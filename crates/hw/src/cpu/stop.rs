@@ -6,7 +6,7 @@ use thiserror::Error;
 
 /// The reason [Cpu::run] returned.
 ///
-/// `E` is the error of the bus that the hart ran on.
+/// `E` is the error of the memory that the hart ran on.
 ///
 /// [Cpu::run]: super::Cpu::run
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -30,9 +30,9 @@ pub enum Stop<E = Infallible> {
     Budget,
     /// The instruction at the program counter cannot be executed. It changed no state.
     Fault(Fault),
-    /// The bus failed an access that the instruction at the program counter needs: the fetch of
+    /// The memory failed an access that the instruction at the program counter needs: the fetch of
     /// the instruction itself, a load or a store. The instruction changed no register.
-    Bus(E),
+    Memory(E),
 }
 
 /// A condition that prevents an instruction from executing.

@@ -1,16 +1,17 @@
 # `brisc-emu`
 
-This crate contains a RISC-V emulator. An `Emulator` puts together a hart from `brisc-hw`, the bus it runs on, a
+This crate contains a RISC-V emulator. An `Emulator` puts together a hart from `brisc-hw`, the memory it runs on, a
 kernel that services its system calls, and a context that the kernel works on:
 
-- The bus is any `brisc_hw::bus::Bus`: `SparseMemory`, or memory and devices of your own.
+- The memory is anything that implements `brisc_hw::memory::Memory`: `SparseMemory`, or memory and devices
+  of your own.
 - The kernel is a `Kernel` or an `AsyncKernel`. `MinimalKernel` has the `exit` and `write` system
   calls, which is enough for programs that only compute and print.
 - The context is state outside the kernel that every system call receives. The emulator hands
   it back with `Emulator::take_ctx`.
 
 The hart is configured through `Emulator::cpu`, and the crate has an ELF loader to put programs on
-the bus.
+the memory.
 
 ## Features
 
@@ -36,7 +37,7 @@ use brisc_emu::{
     Emulator,
 };
 use brisc_hw::{
-    bus::Bus,
+    memory::Memory,
     cpu::Registers,
     memory::SparseMemory,
     XWord, REG_A0, REG_A1, REG_A2,
@@ -79,10 +80,10 @@ impl Kernel<String> for ExampleKernel {
     /// The number of the unsupported system call.
     type Error = XWord;
 
-    fn syscall<B: Bus>(
+    fn syscall<B: Memory>(
         &mut self,
         sysno: XWord,
-        bus: &mut B,
+        memory: &mut B,
         registers: &mut Registers,
         output: &mut String,
     ) -> Result<Syscall, SyscallError<XWord, B::Error>> {
@@ -92,7 +93,7 @@ impl Kernel<String> for ExampleKernel {
             // write
             0x40 => {
                 let mut msg = vec![0; registers.get(REG_A2) as usize];
-                bus.read(registers.get(REG_A1), &mut msg)?;
+                memory.read(registers.get(REG_A1), &mut msg)?;
                 output.push_str(&String::from_utf8_lossy(&msg));
                 Ok(Syscall::Continue)
             }
@@ -114,7 +115,7 @@ A kernel that needs to wait for something implements `AsyncKernel` instead and i
 `Emulator::run_async`. Both kinds of kernel are available in the same build.
 
 `Emulator::run` returns an `EmulationError` when the guest executes something that is not an
-instruction, executes an `ebreak`, when the bus fails an access, and when the kernel fails a
+instruction, executes an `ebreak`, when the memory fails an access, and when the kernel fails a
 system call. After the first three the emulator is as it was before the instruction that failed, so
 the caller can inspect it, repair the cause and run it again. After a failed system call, running again
 makes the call again, and the kernel may have changed things before it failed.

@@ -46,7 +46,7 @@
 //! Loads and stores are done in the generated code through the software TLB that a [Probe]
 //! describes. An access that the software TLB does not serve is not done by the region: the region
 //! leaves before the instruction, and the interpreter executes it, with all the cases that it
-//! handles: unmapped and watched pages, accesses across pages, and errors of the bus. A region
+//! handles: unmapped and watched pages, accesses across pages, and errors of the memory. A region
 //! therefore contains no calls and needs no way to report errors.
 //!
 //! # Exactness
@@ -112,10 +112,10 @@ pub enum Quality {
 /// of the page, the bytes of the access are at the offset within the page in the frame that
 /// [TLB_FRAME] names; frame n begins [FRAME_SIZE] times n bytes after the probe's `frames`.
 ///
-/// Generated code reads and writes memory through the probe without asking the bus, so a probe
-/// can only describe a software TLB that serves exactly the accesses that the bus would perform
+/// Generated code reads and writes memory through the probe without asking the memory, so a probe
+/// can only describe a software TLB that serves exactly the accesses that the memory would perform
 /// the same way: with no error and no side effect, and without letting a store reach a page
-/// that the bus has to hear about. That is why a probe can only be made with the unsafe
+/// that the memory has to hear about. That is why a probe can only be made with the unsafe
 /// [Probe::new].
 ///
 /// Making a probe without `unsafe` does not compile:
@@ -138,17 +138,18 @@ impl Probe {
     /// # Safety
     ///
     /// - tlb must point to [TLB_ENTRIES] entries laid out as described above, and frames to the
-    ///   frames that they name, as long as the probe is used. The owner of the bus makes a new
+    ///   frames that they name, as long as the probe is used. The owner of the memory makes a new
     ///   probe whenever the frames move.
-    /// - A hit in the software TLB must be an access that the bus would perform in the same way, as
-    ///   described above. A page that the bus has to hear about writes to must have no write tag.
+    /// - A hit in the software TLB must be an access that the memory would perform in the same way,
+    ///   as described above. A page that the memory has to hear about writes to must have no write
+    ///   tag.
     pub const unsafe fn new(tlb: *const u8, frames: *mut u8) -> Self {
         Self { tlb, frames: frames as *const u8 }
     }
 }
 
 // SAFETY: A probe only holds addresses. Whoever dereferences them has to ensure that this is
-// sound, which compiled code does while it runs on the thread that owns the bus.
+// sound, which compiled code does while it runs on the thread that owns the memory.
 unsafe impl Send for Probe {}
 // SAFETY: See above.
 unsafe impl Sync for Probe {}

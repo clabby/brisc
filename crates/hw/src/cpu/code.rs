@@ -1,7 +1,9 @@
 //! The cache of decoded instructions.
 
 use super::op::{code, decode, Op};
-use crate::bus::{page_base, page_offset, Address, Bus, PageIndex, MAX_PAGE_INDEX, PAGE_SIZE};
+use crate::memory::{
+    page_base, page_offset, Address, Memory, PageIndex, MAX_PAGE_INDEX, PAGE_SIZE,
+};
 use alloc::{boxed::Box, vec, vec::Vec};
 use brisc_isa::{is_compressed, Opcode};
 use core::fmt;
@@ -60,29 +62,29 @@ impl CodeCache {
     /// Decodes the instructions of `page` from the slot `first` up to the first one that is
     /// already decoded or that execution cannot fall through.
     ///
-    /// Returns the error of the bus if the instruction at `first` cannot be fetched. A later
+    /// Returns the error of the memory if the instruction at `first` cannot be fetched. A later
     /// instruction that cannot be fetched is left for when execution reaches it.
     #[cold]
-    pub(super) fn decode<B: Bus>(
+    pub(super) fn decode<M: Memory>(
         &mut self,
-        bus: &mut B,
+        memory: &mut M,
         page: PageIndex,
         first: usize,
-    ) -> Result<(), B::Error> {
+    ) -> Result<(), M::Error> {
         let position = self.position(page);
-        bus.watch(page);
+        memory.watch(page);
 
         let mut slot = first;
         while slot < SLOTS && self.pages[position][slot].code() == code::DECODE {
             let address = page_base(page).wrapping_add((slot as Address) << 1);
-            let word = match bus.fetch(address) {
+            let word = match memory.fetch(address) {
                 Ok(word) => word,
                 Err(error) if slot == first => return Err(error),
                 Err(_) => break,
             };
             if slot == SLOTS - 1 && !is_compressed(word) {
                 // The word continues on the next page, whether or not it is an instruction.
-                bus.watch(page.wrapping_add(1) & MAX_PAGE_INDEX);
+                memory.watch(page.wrapping_add(1) & MAX_PAGE_INDEX);
             }
 
             let Ok(instruction) = decode(word) else {

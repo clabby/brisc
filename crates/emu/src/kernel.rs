@@ -1,15 +1,15 @@
 //! The interface to the environment that services a guest's system calls.
 //!
 //! The processor never calls a kernel. [Cpu::run] returns [Stop::Ecall] when the guest makes a
-//! system call, and whoever drives the processor hands the guest's registers and its bus to a
+//! system call, and whoever drives the processor hands the guest's registers and its memory to a
 //! [Kernel] or an [AsyncKernel] before running it again.
 //!
 //! [Cpu::run]: brisc_hw::cpu::Cpu::run
 //! [Stop::Ecall]: brisc_hw::cpu::Stop::Ecall
 
 use brisc_hw::{
-    bus::{Address, Bus},
     cpu::Registers,
+    memory::{Address, Memory},
     XWord, REG_A0, REG_A1, REG_A2,
 };
 use core::future::{ready, Future};
@@ -26,22 +26,22 @@ pub enum Syscall {
 
 /// The reason a system call was not serviced.
 ///
-/// `K` is the error of the kernel and `B` the error of the bus. A kernel can apply `?` to the
-/// result of an access to the bus, because an error of the bus converts to
-/// [SyscallError::Bus].
+/// `K` is the error of the kernel and `M` the error of the memory. A kernel can apply `?` to the
+/// result of an access to the memory, because an error of the memory converts to
+/// [SyscallError::Memory].
 #[derive(Error, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SyscallError<K, B> {
+pub enum SyscallError<K, M> {
     /// The kernel cannot service the system call.
     #[error("the kernel cannot service the system call")]
     Kernel(K),
-    /// The bus failed an access that the kernel made.
-    #[error("the bus failed an access by the kernel")]
-    Bus(B),
+    /// The memory failed an access that the kernel made.
+    #[error("the memory failed an access by the kernel")]
+    Memory(M),
 }
 
-impl<K, B> From<B> for SyscallError<K, B> {
-    fn from(error: B) -> Self {
-        Self::Bus(error)
+impl<K, M> From<M> for SyscallError<K, M> {
+    fn from(error: M) -> Self {
+        Self::Memory(error)
     }
 }
 
@@ -54,14 +54,14 @@ pub trait Kernel<S> {
     type Error;
 
     /// Services system call number `syscall_no`. Its arguments are in `registers` and on the
-    /// `bus`, which also receive its results.
-    fn syscall<B: Bus>(
+    /// `memory`, which also receive its results.
+    fn syscall<M: Memory>(
         &mut self,
         syscall_no: XWord,
-        bus: &mut B,
+        memory: &mut M,
         registers: &mut Registers,
         state: &mut S,
-    ) -> Result<Syscall, SyscallError<Self::Error, B::Error>>;
+    ) -> Result<Syscall, SyscallError<Self::Error, M::Error>>;
 }
 
 /// A kernel that may suspend while it services a system call.
@@ -73,27 +73,27 @@ pub trait AsyncKernel<S> {
     type Error;
 
     /// Services system call number `syscall_no`. Its arguments are in `registers` and on the
-    /// `bus`, which also receive its results.
-    fn syscall<B: Bus>(
+    /// `memory`, which also receive its results.
+    fn syscall<M: Memory>(
         &mut self,
         syscall_no: XWord,
-        bus: &mut B,
+        memory: &mut M,
         registers: &mut Registers,
         state: &mut S,
-    ) -> impl Future<Output = Result<Syscall, SyscallError<Self::Error, B::Error>>>;
+    ) -> impl Future<Output = Result<Syscall, SyscallError<Self::Error, M::Error>>>;
 }
 
 impl<S, K: Kernel<S>> AsyncKernel<S> for K {
     type Error = K::Error;
 
-    fn syscall<B: Bus>(
+    fn syscall<M: Memory>(
         &mut self,
         syscall_no: XWord,
-        bus: &mut B,
+        memory: &mut M,
         registers: &mut Registers,
         state: &mut S,
-    ) -> impl Future<Output = Result<Syscall, SyscallError<Self::Error, B::Error>>> {
-        ready(Kernel::syscall(self, syscall_no, bus, registers, state))
+    ) -> impl Future<Output = Result<Syscall, SyscallError<Self::Error, M::Error>>> {
+        ready(Kernel::syscall(self, syscall_no, memory, registers, state))
     }
 }
 
@@ -101,13 +101,13 @@ impl<S, K: Kernel<S>> AsyncKernel<S> for K {
 impl<S> Kernel<S> for () {
     type Error = ();
 
-    fn syscall<B: Bus>(
+    fn syscall<M: Memory>(
         &mut self,
         _: XWord,
-        _: &mut B,
+        _: &mut M,
         _: &mut Registers,
         _: &mut S,
-    ) -> Result<Syscall, SyscallError<Self::Error, B::Error>> {
+    ) -> Result<Syscall, SyscallError<Self::Error, M::Error>> {
         Err(SyscallError::Kernel(()))
     }
 }
@@ -139,13 +139,13 @@ pub struct UnknownSyscall(pub XWord);
 impl<S: Extend<u8>> Kernel<S> for MinimalKernel {
     type Error = UnknownSyscall;
 
-    fn syscall<B: Bus>(
+    fn syscall<M: Memory>(
         &mut self,
         syscall_no: XWord,
-        bus: &mut B,
+        memory: &mut M,
         registers: &mut Registers,
         output: &mut S,
-    ) -> Result<Syscall, SyscallError<Self::Error, B::Error>> {
+    ) -> Result<Syscall, SyscallError<Self::Error, M::Error>> {
         match syscall_no {
             Self::EXIT => Ok(Syscall::Exit(registers.get(REG_A0))),
             Self::WRITE => {
@@ -156,7 +156,7 @@ impl<S: Extend<u8>> Kernel<S> for MinimalKernel {
                 let mut buffer = [0; 256];
                 while remaining > 0 {
                     let piece = &mut buffer[..remaining.min(256) as usize];
-                    bus.read(address, piece)?;
+                    memory.read(address, piece)?;
                     output.extend(piece.iter().copied());
                     address = address.wrapping_add(piece.len() as Address);
                     remaining -= piece.len() as XWord;
@@ -192,10 +192,10 @@ mod test {
             addi a7, zero, 1;
             ecall;
         };
-        let mut bus = SparseMemory::new();
-        bus.write(0x1000, &code).unwrap();
-        bus.write(0x700, &message).unwrap();
-        let mut emu = Emulator::new(bus, MinimalKernel, Vec::new()).with_entry(0x1000);
+        let mut memory = SparseMemory::new();
+        memory.write(0x1000, &code).unwrap();
+        memory.write(0x700, &message).unwrap();
+        let mut emu = Emulator::new(memory, MinimalKernel, Vec::new()).with_entry(0x1000);
 
         assert_eq!(emu.run(), Ok(300));
         assert_eq!(emu.ctx, message);

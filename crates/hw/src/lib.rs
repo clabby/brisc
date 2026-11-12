@@ -7,7 +7,6 @@
 
 extern crate alloc;
 
-pub mod bus;
 pub mod cpu;
 pub mod memory;
 

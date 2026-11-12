@@ -6,8 +6,8 @@
 //! guest has overwritten.
 
 #[cfg(feature = "a")]
-use crate::bus::Address;
-use crate::bus::{page_base, page_index, Bus};
+use crate::memory::Address;
+use crate::memory::{page_base, page_index, Memory};
 use brisc_isa::XWord;
 
 mod code;
@@ -44,7 +44,7 @@ pub use stop::{Fault, Stop};
 ///   compilers emit where execution must not continue, is such an instruction.
 /// - `mret`, `sret`, `wfi` and `sfence.vma` do nothing, because there are no privilege levels,
 ///   interrupts or address translation. `fence` and `fence.i` do nothing either: there is one hart,
-///   and decoded instructions follow writes to the bus without being told to.
+///   and decoded instructions follow writes to the memory without being told to.
 #[derive(Debug)]
 pub struct Cpu {
     /// The integer registers.
@@ -78,16 +78,16 @@ impl Cpu {
         }
     }
 
-    /// Executes instructions from `bus` until `budget` of them have been retired, or until an
-    /// `ecall`, an `ebreak`, a [Fault] or an error of the bus stops execution earlier.
+    /// Executes instructions from `memory` until `budget` of them have been retired, or until an
+    /// `ecall`, an `ebreak`, a [Fault] or an error of the memory stops execution earlier.
     ///
-    /// The instructions that the hart has decoded stay coherent with `bus` as long as the bus
-    /// reports the writes to them, as [Bus] describes.
-    pub fn run<B: Bus>(&mut self, bus: &mut B, budget: u64) -> Stop<B::Error> {
+    /// The instructions that the hart has decoded stay coherent with `memory` as long as the memory
+    /// reports the writes to them, as [Memory] describes.
+    pub fn run<M: Memory>(&mut self, memory: &mut M, budget: u64) -> Stop<M::Error> {
         let mut remaining = budget;
 
         let stop = loop {
-            while let Some(page) = bus.pop_dirty() {
+            while let Some(page) = memory.pop_dirty() {
                 #[allow(unused_variables)]
                 let position = self.code.invalidate(page);
                 #[cfg(feature = "jit")]
@@ -111,11 +111,11 @@ impl Cpu {
             let jit = false;
             macro_rules! run {
                 ($precise:literal, $jit:literal) => {
-                    execute::<B, $precise, $jit>(
+                    execute::<M, $precise, $jit>(
                         &mut self.registers,
                         #[cfg(feature = "a")]
                         &mut self.reservation,
-                        bus,
+                        memory,
                         code,
                         #[cfg(feature = "jit")]
                         &mut self.code.counters[position],
@@ -138,8 +138,8 @@ impl Cpu {
             match exit {
                 Exit::Leave => {}
                 Exit::Decode => {
-                    if let Err(error) = self.code.decode(bus, page, slot_of(pc)) {
-                        break Stop::Bus(error);
+                    if let Err(error) = self.code.decode(memory, page, slot_of(pc)) {
+                        break Stop::Memory(error);
                     }
                 }
                 Exit::Ecall => break Stop::Ecall,
@@ -151,9 +151,9 @@ impl Cpu {
                 }
                 #[cfg(feature = "a")]
                 Exit::Fault(fault) => break Stop::Fault(fault),
-                Exit::Bus(error) => break Stop::Bus(error),
+                Exit::Memory(error) => break Stop::Memory(error),
                 #[cfg(feature = "jit")]
-                Exit::Hot => self.enter_region(bus, page, position, slot_of(pc), &mut remaining),
+                Exit::Hot => self.enter_region(memory, page, position, slot_of(pc), &mut remaining),
             }
         };
 

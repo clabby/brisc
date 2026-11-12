@@ -5,20 +5,20 @@ use super::{
     op::{code, Op},
     Registers,
 };
-use crate::bus::{page_index, Bus};
+use crate::memory::{page_index, Memory};
 use brisc_isa::{SXWord, Word, XWord};
 
 #[cfg(feature = "a")]
 use super::Fault;
 #[cfg(feature = "a")]
-use crate::bus::Address;
+use crate::memory::Address;
 #[cfg(feature = "a")]
 use brisc_isa::Opcode;
 
 #[cfg(feature = "m")]
 use brisc_isa::{DoubleXWord, SDoubleXWord, X_LEN};
 
-/// Why [execute] returned. `E` is the error of the bus.
+/// Why [execute] returned. `E` is the error of the memory.
 pub(super) enum Exit<E> {
     /// Execution continues at the returned program counter, on another page or after the caller
     /// has looked at the remaining budget and at writes to watched pages.
@@ -34,8 +34,8 @@ pub(super) enum Exit<E> {
     /// The instruction at the returned program counter faulted.
     #[cfg(feature = "a")]
     Fault(Fault),
-    /// The bus failed an access of the instruction at the returned program counter.
-    Bus(E),
+    /// The memory failed an access of the instruction at the returned program counter.
+    Memory(E),
     /// Control has flowed back to the slot at the returned program counter often enough for a
     /// region to be compiled there.
     #[cfg(feature = "jit")]
@@ -150,17 +150,17 @@ fn op_at(code: &CodePage, slot: usize) -> Op {
     clippy::too_many_arguments,
     reason = "the interpreter keeps its state in locals, and bundling it would not make it faster"
 )]
-pub(super) fn execute<B: Bus, const PRECISE: bool, const JIT: bool>(
+pub(super) fn execute<M: Memory, const PRECISE: bool, const JIT: bool>(
     registers: &mut Registers,
     #[cfg(feature = "a")] reservation: &mut Option<Address>,
-    bus: &mut B,
+    memory: &mut M,
     code: &CodePage,
     #[cfg(feature = "jit")] counters: &mut [u16; SLOTS],
     #[cfg(feature = "jit")] threshold: u16,
     base: XWord,
     mut slot: usize,
     remaining: &mut u64,
-) -> (Exit<B::Error>, XWord) {
+) -> (Exit<M::Error>, XWord) {
     let r = &mut registers.0;
     let budget = (*remaining).min(i64::MAX as u64) as i64;
     let mut n = budget;
@@ -223,27 +223,27 @@ pub(super) fn execute<B: Bus, const PRECISE: bool, const JIT: bool>(
                 set!($advance, value as i32 as SXWord as XWord)
             }};
         }
-        // Leaves the loop, without retiring the instruction, if the bus fails an access.
+        // Leaves the loop, without retiring the instruction, if the memory fails an access.
         macro_rules! access {
             ($access:expr) => {
                 match $access {
                     Ok(value) => value,
                     Err(error) => {
                         n += 1;
-                        break (Exit::Bus(error), pc!());
+                        break (Exit::Memory(error), pc!());
                     }
                 }
             };
         }
         macro_rules! load {
             ($advance:ident, $ty:ty) => {{
-                let bytes = access!(bus.load(address!()));
+                let bytes = access!(memory.load(address!()));
                 set!($advance, <$ty>::from_le_bytes(bytes) as SXWord as XWord)
             }};
         }
         macro_rules! store {
             ($advance:ident, $ty:ty) => {{
-                let watched = access!(bus.store(address!(), (rs2!() as $ty).to_le_bytes()));
+                let watched = access!(memory.store(address!(), (rs2!() as $ty).to_le_bytes()));
                 slot += $advance;
                 if watched {
                     break (Exit::Leave, pc!());
@@ -295,7 +295,7 @@ pub(super) fn execute<B: Bus, const PRECISE: bool, const JIT: bool>(
         #[cfg(feature = "a")]
         macro_rules! atomic {
             ($advance:ident) => {{
-                match atomic(r, reservation, bus, op) {
+                match atomic(r, reservation, memory, op) {
                     Ok(watched) => {
                         slot += $advance;
                         if watched {
@@ -480,12 +480,12 @@ pub(super) fn execute<B: Bus, const PRECISE: bool, const JIT: bool>(
     clippy::unnecessary_cast,
     reason = "XWord is 32 or 64 bits wide depending on the enabled features"
 )]
-fn atomic<B: Bus>(
+fn atomic<M: Memory>(
     r: &mut [XWord; Registers::LEN],
     reservation: &mut Option<Address>,
-    bus: &mut B,
+    memory: &mut M,
     op: Op,
-) -> Result<bool, Exit<B::Error>> {
+) -> Result<bool, Exit<M::Error>> {
     use Opcode::*;
 
     let opcode = op.opcode();
@@ -509,38 +509,38 @@ fn atomic<B: Bus>(
         return Err(Exit::Fault(Fault::UnalignedAmo));
     }
 
-    let load = |bus: &mut B| -> Result<XWord, Exit<B::Error>> {
+    let load = |memory: &mut M| -> Result<XWord, Exit<M::Error>> {
         #[cfg(feature = "64-bit")]
         if !word {
-            return bus.load(address).map(XWord::from_le_bytes).map_err(Exit::Bus);
+            return memory.load(address).map(XWord::from_le_bytes).map_err(Exit::Memory);
         }
-        let bytes = bus.load(address).map_err(Exit::Bus)?;
+        let bytes = memory.load(address).map_err(Exit::Memory)?;
         Ok(i32::from_le_bytes(bytes) as SXWord as XWord)
     };
-    let store = |bus: &mut B, value: XWord| -> Result<bool, Exit<B::Error>> {
+    let store = |memory: &mut M, value: XWord| -> Result<bool, Exit<M::Error>> {
         #[cfg(feature = "64-bit")]
         if !word {
-            return bus.store(address, value.to_le_bytes()).map_err(Exit::Bus);
+            return memory.store(address, value.to_le_bytes()).map_err(Exit::Memory);
         }
-        bus.store(address, (value as u32).to_le_bytes()).map_err(Exit::Bus)
+        memory.store(address, (value as u32).to_le_bytes()).map_err(Exit::Memory)
     };
 
-    // The reservation and the destination register change only once the bus has performed
+    // The reservation and the destination register change only once the memory has performed
     // every access of the instruction.
     let (result, watched) = match opcode {
         LrW | LrD => {
-            let value = load(bus)?;
+            let value = load(memory)?;
             *reservation = Some(address);
             (value, false)
         }
         ScW | ScD => {
             let reserved = *reservation == Some(address);
-            let watched = reserved && store(bus, source)?;
+            let watched = reserved && store(memory, source)?;
             *reservation = None;
             (!reserved as XWord, watched)
         }
         _ => {
-            let old = load(bus)?;
+            let old = load(memory)?;
             let source = if word { source as i32 as SXWord as XWord } else { source };
             let new = match opcode {
                 AmoswapW | AmoswapD => source,
@@ -554,7 +554,7 @@ fn atomic<B: Bus>(
                 AmomaxuW | AmomaxuD => old.max(source),
                 _ => unreachable!("only atomic instructions are dispatched here"),
             };
-            (old, store(bus, new)?)
+            (old, store(memory, new)?)
         }
     };
 

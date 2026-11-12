@@ -5,7 +5,7 @@
 //! registers, the program counter, the number of instructions retired and the memory.
 
 use super::*;
-use crate::{bus::Bus, memory::SparseMemory};
+use crate::memory::{Memory, SparseMemory};
 use brisc_isa::{rv, rv_code, Format, Instruction, Opcode, XWord, REG_A0};
 
 const CODE: XWord = 0x10000;

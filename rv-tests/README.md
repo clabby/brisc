@@ -51,7 +51,7 @@ For the sake of `brisc`, we only care about a few of the test suites that are av
     - An `ecall` id dispatched, instructing the emulator to exit.
 
 A simple test runner for these tests should:
-- Load the ELF file into the memory bus.
+- Load the ELF file into memory.
 - Instantiate an emulator with the memory containing the program.
 - Register a system call interupt handler that exits emulation + sets the exit code when `sys_exit` is dispatched.
 - Run emulation until the program is exited by a system call interrupt.

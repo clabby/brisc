@@ -17,7 +17,7 @@ and the layout of the code move small differences by a few percent.
   compared with the addresses after the calls in the region. `fib` went from 0.6 times the speed of
   the interpreter, because every call and return left the region, to 4 times.
 - **Leaving the region for anything that is not a plain memory access.** A TLB miss, an unmapped or
-  watched page, an access across pages and an error of the bus make a region leave before the
+  watched page, an access across pages and an error of the memory make a region leave before the
   instruction, and the interpreter executes it. Regions first called helpers for these. Leaving
   produced less code, compiled faster and left error handling in one place, with the same results.
 - **A table for finding regions** instead of a hash map keyed by page and slot. Entering a region

@@ -2,7 +2,7 @@
 
 use alloc::{format, string::String};
 use brisc_hw::{
-    bus::{Address, Bus},
+    memory::{Address, Memory},
     XWord,
 };
 use elf::{abi::PT_LOAD, endian::AnyEndian, ElfBytes};
@@ -10,25 +10,25 @@ use thiserror::Error;
 
 /// The reason an ELF file was not loaded.
 #[derive(Error, Debug, Clone, PartialEq, Eq)]
-pub enum LoadError<B> {
+pub enum LoadError<M> {
     /// The file is not an ELF file that can be loaded. The message says why.
     #[error("{0}")]
     Elf(String),
-    /// The bus failed the write of a segment.
-    #[error("the bus failed the write of a segment")]
-    Bus(B),
+    /// The memory failed the write of a segment.
+    #[error("the memory failed the write of a segment")]
+    Memory(M),
 }
 
-/// Loads a raw ELF file onto a [Bus].
+/// Loads a raw ELF file onto a [Memory].
 ///
 /// ### Takes
-/// - `bus`: The bus that the segments of the file are written to.
+/// - `memory`: The memory that the segments of the file are written to.
 /// - `raw`: The raw contents of the ELF file to load.
 ///
 /// ### Returns
 /// - `Ok(entry_pc)` if the ELF file was loaded successfully
 /// - `Err(_)` if the ELF file could not be loaded
-pub fn load_elf<B: Bus>(bus: &mut B, raw: &[u8]) -> Result<XWord, LoadError<B::Error>> {
+pub fn load_elf<M: Memory>(memory: &mut M, raw: &[u8]) -> Result<XWord, LoadError<M::Error>> {
     let elf = ElfBytes::<AnyEndian>::minimal_parse(raw)
         .map_err(|e| LoadError::Elf(format!("Failed to parse ELF file: {e}")))?;
 
@@ -72,8 +72,9 @@ pub fn load_elf<B: Bus>(bus: &mut B, raw: &[u8]) -> Result<XWord, LoadError<B::E
 
         // Only the bytes present in the file are written. The rest of the segment is expected
         // to read as zero already.
-        bus.write(header.p_vaddr as Address, &segment_data[..header.p_filesz as usize])
-            .map_err(LoadError::Bus)?;
+        memory
+            .write(header.p_vaddr as Address, &segment_data[..header.p_filesz as usize])
+            .map_err(LoadError::Memory)?;
     }
 
     Ok(elf.ehdr.e_entry as XWord)

@@ -3,14 +3,14 @@
 A RISC-V hart and the hardware it runs on:
 
 - `cpu` is the processor: the register file, the program counter and the interpreter.
-- `bus` is the `Bus` trait, through which the processor reaches memory and devices.
-- `memory` is `SparseMemory`, a bus that is all memory.
+- `memory` is the `Memory` trait, through which the processor reaches memory and devices, and
+  `SparseMemory`, a memory that is all RAM.
 
 The crate is `no_std` and needs `alloc`, or `std` with the `jit` feature. It re-exports `brisc-isa`.
 
 ```rust
 use brisc_hw::{
-    bus::Bus,
+    memory::Memory,
     cpu::{Cpu, Stop},
     memory::SparseMemory,
     rv_code, REG_A0,
@@ -37,10 +37,10 @@ assert_eq!((cpu.pc, cpu.instret), (0x1008, 3));
 
 `Cpu::run` executes instructions until it has retired the number it was asked for, and returns
 earlier at an `ecall`, at an `ebreak`, at an instruction that cannot be executed, and when the
-bus fails an access. It never calls a kernel. Whoever drives the hart decides what a system call
+memory fails an access. It never calls a kernel. Whoever drives the hart decides what a system call
 does, changes the registers and the program counter, and calls `run` again.
 
-Each instruction is decoded once and kept in decoded form, per page. The bus tells the
+Each instruction is decoded once and kept in decoded form, per page. The memory tells the
 processor about writes to pages it has decoded from, so code that changes is decoded again
 without the guest having to execute `fence.i`.
 
@@ -48,12 +48,12 @@ Privilege levels, interrupts and address translation are not modelled. Control a
 registers read as zero and ignore writes, and writing to a read-only one is a fault. The
 documentation of `Cpu` has the details.
 
-## The bus
+## The memory
 
-A bus needs two methods, `load` and `store`, and chooses the type of its errors. A bus that
+A memory needs two methods, `load` and `store`, and chooses the type of its errors. A memory that
 cannot fail uses `Infallible`, and the processor's checks compile to nothing. Instruction
 fetches, bulk reads and writes, and the reporting of writes to code have default
-implementations that a bus can replace. The documentation of `Bus` describes the contract.
+implementations that a memory can replace. The documentation of `Memory` describes the contract.
 
 ## The JIT compiler
 
@@ -71,8 +71,8 @@ long. By default this happens on a thread of its own, so the interpreter carries
 programs do not wait. `Cpu::set_jit` changes this or turns the JIT off, and `Cpu::jit_stats` says what
 it has done.
 
-Regions read and write memory through the software TLB of the bus, so the bus has to describe
-one with `Bus::probe`. `SparseMemory` does. With a bus that does not, the JIT does nothing. The
+Regions read and write memory through a software TLB that the memory describes with
+`Memory::probe`. `SparseMemory` does. With a memory that does not, the JIT does nothing. The
 feature needs the standard library and the `64-bit` feature. Because features add up across a build, any
 crate that enables `jit` turns the JIT on, with its compiler thread, for every hart in the build
 that is not configured otherwise.

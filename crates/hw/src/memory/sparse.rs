@@ -1,6 +1,6 @@
 //! A sparse, paged memory.
 
-use crate::bus::{page_index, page_offset, Address, Bus, PageIndex, PAGE_SIZE};
+use crate::memory::{page_index, page_offset, Address, Memory, PageIndex, PAGE_SIZE};
 use alloc::{boxed::Box, vec, vec::Vec};
 use brisc_isa::Word;
 use core::{convert::Infallible, fmt};
@@ -11,7 +11,7 @@ const TLB_ENTRIES: usize = 1 << 10;
 
 /// A tag that matches no page: it is larger than [MAX_PAGE_INDEX].
 ///
-/// [MAX_PAGE_INDEX]: crate::bus::MAX_PAGE_INDEX
+/// [MAX_PAGE_INDEX]: crate::memory::MAX_PAGE_INDEX
 const NO_PAGE: PageIndex = PageIndex::MAX;
 
 /// A cached translation from a page to the frame that backs it.
@@ -39,7 +39,7 @@ struct Frame([u8; PAGE_SIZE]);
 
 const _: () = assert!(align_of::<Frame>() == PAGE_SIZE && size_of::<Frame>() == PAGE_SIZE);
 
-/// A [Bus] that is all memory, with pages mapped on first write.
+/// A [Memory] that is all memory, with pages mapped on first write.
 ///
 /// Every address is readable and writable, so no access fails. Memory that was never written
 /// reads as zero, and reading it does not map a page.
@@ -55,7 +55,7 @@ pub struct SparseMemory {
     pages: HashMap<PageIndex, u32>,
     /// Whether each frame's page is watched.
     watched: Vec<bool>,
-    /// Pages written while watched, not yet returned from [Bus::pop_dirty].
+    /// Pages written while watched, not yet returned from [Memory::pop_dirty].
     dirty: Vec<PageIndex>,
     /// The translation cache, indexed by the low bits of the page index.
     tlb: Box<[TlbEntry; TLB_ENTRIES]>,
@@ -202,7 +202,7 @@ impl fmt::Debug for SparseMemory {
     }
 }
 
-impl Bus for SparseMemory {
+impl Memory for SparseMemory {
     type Error = Infallible;
 
     #[inline(always)]

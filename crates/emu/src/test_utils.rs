@@ -5,9 +5,8 @@ use crate::{
     Emulator,
 };
 use brisc_hw::{
-    bus::Bus,
     cpu::{Registers, Stop},
-    memory::SparseMemory,
+    memory::{Memory, SparseMemory},
     XWord, REG_A7,
 };
 use std::{
@@ -141,7 +140,7 @@ fn run_in_slices(elf: &[u8], budget: u64) -> u64 {
     let mut emu = deterministic(load(MinimalKernel, elf));
     loop {
         let retired = emu.cpu.instret;
-        let stop = emu.cpu.run(&mut emu.bus, budget);
+        let stop = emu.cpu.run(&mut emu.memory, budget);
         match stop {
             Stop::Budget => assert_eq!(emu.cpu.instret - retired, budget),
             Stop::Ecall => {
@@ -149,7 +148,7 @@ fn run_in_slices(elf: &[u8], budget: u64) -> u64 {
                 let syscall = Kernel::syscall(
                     &mut emu.kernel,
                     emu.cpu.registers.get(REG_A7),
-                    &mut emu.bus,
+                    &mut emu.memory,
                     &mut emu.cpu.registers,
                     &mut emu.ctx,
                 )
@@ -164,7 +163,7 @@ fn run_in_slices(elf: &[u8], budget: u64) -> u64 {
             }
             Stop::Fault(fault) => panic!("{fault}"),
             Stop::Ebreak => panic!("ebreak"),
-            Stop::Bus(error) => match error {},
+            Stop::Memory(error) => match error {},
         }
     }
 }
@@ -179,16 +178,16 @@ struct SuspendingKernel {
 impl AsyncKernel<Vec<u8>> for SuspendingKernel {
     type Error = UnknownSyscall;
 
-    async fn syscall<B: Bus>(
+    async fn syscall<M: Memory>(
         &mut self,
         syscall_no: XWord,
-        bus: &mut B,
+        memory: &mut M,
         registers: &mut Registers,
         output: &mut Vec<u8>,
-    ) -> Result<Syscall, SyscallError<UnknownSyscall, B::Error>> {
+    ) -> Result<Syscall, SyscallError<UnknownSyscall, M::Error>> {
         SuspendOnce(false).await;
         self.suspensions += 1;
-        Kernel::syscall(&mut MinimalKernel, syscall_no, bus, registers, output)
+        Kernel::syscall(&mut MinimalKernel, syscall_no, memory, registers, output)
     }
 }
 

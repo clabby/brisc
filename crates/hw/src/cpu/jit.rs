@@ -16,7 +16,7 @@ use super::{
     op::{code, Op},
     Cpu,
 };
-use crate::bus::{page_base, Bus, PageIndex};
+use crate::memory::{page_base, Memory, PageIndex};
 use brisc_isa::Instruction;
 use brisc_jit::{Background, Ctx, Jit, Job, Quality, Region, Request};
 use std::{
@@ -387,17 +387,17 @@ impl Cpu {
 
     /// Runs the region that can be entered at slot of the page at position, if there is one and
     /// the budget in remaining allows it. Has the region compiled the first time.
-    pub(super) fn enter_region<B: Bus>(
+    pub(super) fn enter_region<M: Memory>(
         &mut self,
-        bus: &mut B,
+        memory: &mut M,
         page: PageIndex,
         position: usize,
         slot: usize,
         remaining: &mut u64,
     ) {
         let threshold = self.jit.threshold();
-        // Regions access memory through the software TLB of the bus.
-        let (true, Some(probe)) = (self.jit.enabled(), bus.probe()) else {
+        // Regions access memory through the software TLB that the memory describes.
+        let (true, Some(probe)) = (self.jit.enabled(), memory.probe()) else {
             self.code.counters[position][slot] = 0;
             return;
         };
